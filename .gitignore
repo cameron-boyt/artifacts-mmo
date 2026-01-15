@@ -1,3 +1,4 @@
-/plan.md
+plan.md
+token.txt
 *.log
-*.pyc
+src/__pycache__
