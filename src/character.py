@@ -74,6 +74,7 @@ class CharacterAgent:
         if response:
             self.char_data = response.get("data").get("character")
             cooldown = response.get("data").get("cooldown").get("remaining_seconds")
-
-        return cooldown
+            return cooldown
+        else:
+            return 0.0
 
