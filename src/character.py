@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Dict, Any
+from typing import TYPE_CHECKING, Dict, List, Tuple, Any
 from action import Action, ActionGroup, ActionCondition, CharacterAction
 from api import APIClient, ActionResult
 import logging
@@ -8,7 +8,7 @@ if TYPE_CHECKING:
 
 class CharacterAgent:
     """Represents a single character, holding its state and execution logic."""
-    def __init__(self, character_data: Dict[str, Any], bank_data: Dict[str, Any], map_data: Dict[str, Any], api_client: APIClient, scheduler: ActionScheduler):
+    def __init__(self, character_data: Dict[str, Any], bank_data: Dict[str, Any], api_client: APIClient, scheduler: ActionScheduler):
         self.logger = logging.getLogger(__name__)
         
         self.api_client: APIClient = api_client
@@ -17,44 +17,43 @@ class CharacterAgent:
         self.name = character_data["name"]
         self.char_data: Dict[str, Any] = character_data
         self.bank_data = bank_data
-        self.map_data = map_data
 
         self.is_autonomous: bool = False
         self.cooldown_expires_at: float = 0.0
 
         self.prev_location = (0, 0)
 
+    ## Helper Functions
+    def get_closest_location(self, locations: List[Tuple[int, int]]) -> Tuple[int, int]:
+        """Get the location which is the shortest distance from the agent."""
+        shortest_distance = 9999
+        best_location = (0, 0)
 
-    ## CONDITION CHECKERS
+        for location in locations:
+            distance = pow(pow(self.char_data["x"] - location[0], 2) + pow(self.char_data["y"] - location[1], 2), 0.5)
+            if distance < shortest_distance:
+                shortest_distance = distance
+                best_location = location
+
+        return best_location
+
+    ## Condition Checkers
     def is_inventory_full(self) -> bool:
+        """Check if the agent's inventory is full."""
         item_count = sum(item["quantity"] for item in self.char_data["inventory"])
         return item_count >= self.char_data["inventory_max_items"]
     
     def bank_has_item_of_quantity(self, item_code: str, quantity: int) -> bool:
+        """Check if the agent's bank has an item of at least a specific quantity."""
         for item in self.bank_data:
             if item["code"] == item_code:
                 if item["quantity"] >= quantity:
                     return True
 
         return False
-
-    def repeat_condition_met(self, condition: ActionCondition) -> bool:
-        match condition:
-            case ActionCondition.NONE:
-                return True
-            
-            case ActionCondition.FOREVER:
-                return False
-            
-            case ActionCondition.INVENTORY_FULL:
-                return self.is_inventory_full()
-            
-            case _:
-                raise Exception("Unknown condition")
-            
-        return True
     
 
+    ## Action Performance
     async def perform(self, action: Action) -> ActionResult:
         log_msg = f"[{self.name}] Performing action: {action.type.value}"
         if action.params:
