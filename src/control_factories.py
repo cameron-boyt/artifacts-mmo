@@ -8,9 +8,9 @@ def IF(*branches: Tuple[ActionConditionExpression, ActionGroup], fail_path: Acti
         fail_path=fail_path
     )
 
-def REPEAT(control: ActionControlNode, until: ActionConditionExpression) -> ActionControlNode:
+def REPEAT(control_node: ActionControlNode, until: ActionConditionExpression) -> ActionControlNode:
     return ActionControlNode(
         control_operator = ControlOperator.REPEAT,
-        control=control,
+        control_node=control_node,
         until=until
     )
