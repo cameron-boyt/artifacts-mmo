@@ -78,10 +78,10 @@ class ActionConditionExpression:
 @dataclass(frozen=True)
 class ActionControlNode:
     control_operator: ControlOperator
-    branches: List[Tuple[ActionConditionExpression, ActionGroup]] | None
-    fail_path: ActionConditionExpression | None
-    control_node: ActionControlNode | None
-    until: ActionConditionExpression | None
+    branches: List[Tuple[ActionConditionExpression, ActionGroup]] | None = None
+    fail_path: ActionConditionExpression | None = None
+    control_node: ActionControlNode | None = None
+    until: ActionConditionExpression | None = None
 
     def __post_init__(self):
         if self.control_operator == ControlOperator.IF:
