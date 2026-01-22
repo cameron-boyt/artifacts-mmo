@@ -34,9 +34,6 @@ def use() -> Action:
 def gather(until: ActionConditionExpression | None = None) -> Action:
     return Action(CharacterAction.GATHER, until=until)
 
-def gather_resource(agent: CharacterAction, resource: str, until: ActionConditionExpression | None = None) -> Action:
-    return Action(CharacterAction.GATHER, until=until)
-
 def craft(**params) -> Action:
     return Action(CharacterAction.CRAFT, params=params)
 
