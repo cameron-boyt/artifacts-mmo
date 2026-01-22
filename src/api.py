@@ -31,13 +31,23 @@ class APIClient:
         response.raise_for_status()
         return response.json()
     
-    async def get_maps(self) -> dict:
-        response = await self._client.get(f"/maps")
+    async def get_maps(self, page=1) -> dict:
+        response = await self._client.get(f"/maps?page={page}&size=100")
         response.raise_for_status()
         return response.json()
     
-    async def get_bank_items(self) -> dict:
-        response = await self._client.get(f"/my/bank/items")
+    async def get_bank(self, page=1) -> dict:
+        response = await self._client.get(f"/my/bank/items?page={page}&size=100")
+        response.raise_for_status()
+        return response.json()
+    
+    async def get_resources(self, page=1) -> dict:
+        response = await self._client.get(f"/resources?page={page}&size=100")
+        response.raise_for_status()
+        return response.json()
+    
+    async def get_monsters(self, page=1) -> dict:
+        response = await self._client.get(f"/monsters?page={page}&size=100")
         response.raise_for_status()
         return response.json()
     
