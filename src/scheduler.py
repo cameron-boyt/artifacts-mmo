@@ -23,14 +23,14 @@ class ActionScheduler:
         print(self.queues)
 
 
-    def add_character(self, character_data: Dict[str, Any], bank_data: Dict[str, Any], map_data: Dict[str, Any]):
+    def add_character(self, character_data: Dict[str, Any], bank_data: Dict[str, Any]):
         """Add a new charcter to be handled by the scheduler."""
         name = character_data["name"]
         if name in self.agents: 
             return
         
         self.logger.info(f"Adding character: {name}")
-        agent = CharacterAgent(character_data, bank_data, map_data, self.api_client, self)
+        agent = CharacterAgent(character_data, bank_data, self.api_client, self)
         self.agents[name] = agent
         self.queues[name] = deque()
         task = asyncio.create_task(self._worker(name))

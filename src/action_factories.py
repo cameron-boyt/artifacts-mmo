@@ -5,17 +5,24 @@ def group(*actions: Action | ActionGroup, until: ActionConditionExpression | Non
     return ActionGroup(actions=actions, until=until)
 
 ## Base Action Factories
+
+# Movement
 def move(**params) -> Action:
     return Action(CharacterAction.MOVE, params=params)
 
 def transition(**params) -> Action:
     raise NotImplementedError()
 
+# Fighting
 def rest() -> Action:
     return Action(CharacterAction.REST)
 
+def fight(*, until: ActionConditionExpression | None = None) -> Action:
+    return Action(CharacterAction.FIGHT, until=until)
+
+# Equipment
 def equip(**params) -> Action:
-    return Action(CharacterAction.EQUIP)
+    return Action(CharacterAction.EQUIP, params=params)
 
 def unequip(**params) -> Action:
     return Action(CharacterAction.UNEQUIP, params=params)
@@ -23,15 +30,17 @@ def unequip(**params) -> Action:
 def use() -> Action:
     raise NotImplementedError()
 
-def fight(*, until: ActionConditionExpression | None = None) -> Action:
-    return Action(CharacterAction.FIGHT, until=until)
+# Skilling
+def gather(until: ActionConditionExpression | None = None) -> Action:
+    return Action(CharacterAction.GATHER, until=until)
 
-def gather(*, until: ActionConditionExpression | None = None) -> Action:
+def gather_resource(agent: CharacterAction, resource: str, until: ActionConditionExpression | None = None) -> Action:
     return Action(CharacterAction.GATHER, until=until)
 
 def craft(**params) -> Action:
     return Action(CharacterAction.CRAFT, params=params)
 
+# Banking
 def bank_deposit_item(**params) -> Action:
     return Action(CharacterAction.BANK_DEPOSIT_ITEM, params=params)
 

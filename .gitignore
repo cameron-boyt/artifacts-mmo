@@ -2,3 +2,4 @@ plan.md
 token.txt
 *.log
 src/__pycache__
+*.json
