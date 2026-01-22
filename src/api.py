@@ -1,6 +1,16 @@
 import httpx
 from typing import List, Dict
 import logging
+from dataclasses import dataclass
+
+@dataclass 
+class ActionResult:
+    response: dict
+    """Data response from the action request."""
+    success: bool
+    """If the action was successful."""
+    cascade: bool = False
+    """If the result of failure should cascade through the action and cancel all remaining items in the queue."""
 
 class APIClient:
     """Handles all HTTP communication with the remote server."""
@@ -31,87 +41,93 @@ class APIClient:
         response.raise_for_status()
         return response.json()
     
-    async def handle_status(self, response: httpx.Response):
+    async def handle_status(self, response: httpx.Response) -> ActionResult:
+        data = response.json()
+        cascade = True
+
         match response.status_code:
             case 200:
                 # All good
-                return response.json()
+                success = True
             
             case 422:
                 # Invalid payload
-                raise Exception("fuck")
+                success = False
             
             case 404:
                 # Not found
-                raise Exception("fuck")
+                success = False
 
             case 490:
                 # Character already at destination
                 self.logger.warning("Character already at destination")
-                pass
+                success = False
+                cascade = False
 
             case 497:
                 # Character inventory is full
                 self.logger.warning("Character inventory is full")
-                pass
+                success = False
 
             case 499:
                 # Character on cooldown
                 self.logger.warning("Character is on cooldown")
-                pass
+                success = False
 
             case 598:
                 # No resource/monster on map
                 self.logger.warning("No resource/monster on map")
-                pass
+                success = False
 
             case _:
                 raise Exception("fuck")
+            
+        return ActionResult(data, success, cascade)
 
-    async def move(self, character_name: str, x: int, y: int) -> dict:
+    async def move(self, character_name: str, x: int, y: int) -> ActionResult:
         payload = { "x": x, "y": y }
         response = await self._client.post(f"/my/{character_name}/action/move", json=payload)
         return await self.handle_status(response)
 
-    async def fight(self, character_name: str) -> dict:
+    async def fight(self, character_name: str) -> ActionResult:
         response = await self._client.post(f"/my/{character_name}/action/fight")
         return await self.handle_status(response)
 
-    async def rest(self, character_name: str) -> dict:
+    async def rest(self, character_name: str) -> ActionResult:
         response = await self._client.post(f"/my/{character_name}/action/rest")
         return await self.handle_status(response)
 
-    async def gather(self, character_name: str) -> dict:
+    async def gather(self, character_name: str) -> ActionResult:
         response = await self._client.post(f"/my/{character_name}/action/gathering")
         return await self.handle_status(response)
 
-    async def bank_deposit_item(self, character_name: str, items: List[Dict[str, str | int]]) -> dict:
+    async def bank_deposit_item(self, character_name: str, items: List[Dict[str, str | int]]) -> ActionResult:
         response = await self._client.post(f"/my/{character_name}/action/bank/deposit/item", json=items)
         return await self.handle_status(response)
 
-    async def bank_withdraw_item(self, character_name: str, items: List[Dict[str, str | int]]) -> dict:
-        response = await self._client.post(f"/my/{character_name}/action/bank/deposit/item", json=items)
+    async def bank_withdraw_item(self, character_name: str, items: List[Dict[str, str | int]]) -> ActionResult:
+        response = await self._client.post(f"/my/{character_name}/action/bank/withdraw/item", json=items)
         return await self.handle_status(response)
 
-    async def bank_deposit_gold(self, character_name: str, quantity: int) -> dict:
+    async def bank_deposit_gold(self, character_name: str, quantity: int) -> ActionResult:
+        response = await self._client.post(f"/my/{character_name}/action/bank/deposit/gold", json=quantity)
+        return await self.handle_status(response)
+
+    async def bank_withdraw_gold(self, character_name: str, quantity: int) -> ActionResult:
         response = await self._client.post(f"/my/{character_name}/action/bank/withdraw/gold", json=quantity)
         return await self.handle_status(response)
 
-    async def bank_withdraw_gold(self, character_name: str, quantity: int) -> dict:
-        response = await self._client.post(f"/my/{character_name}/action/bank/withdraw/gold", json=quantity)
-        return await self.handle_status(response)
-
-    async def unequip(self, character_name: str, item_slot: str) -> dict:
+    async def unequip(self, character_name: str, item_slot: str) -> ActionResult:
         payload = { "slot": item_slot }
         response = await self._client.post(f"/my/{character_name}/action/unequip", json=payload)
         return await self.handle_status(response)
 
-    async def craft(self, character_name: str, item_slot: str) -> dict:
+    async def craft(self, character_name: str, item_slot: str) -> ActionResult:
         payload = { "code": item_slot }
         response = await self._client.post(f"/my/{character_name}/action/crafting", json=payload)
         return await self.handle_status(response)
 
-    async def equip(self, character_name: str, item_code: str, item_slot: str, ) -> dict:
+    async def equip(self, character_name: str, item_code: str, item_slot: str, ) -> ActionResult:
         payload = { "code": item_code, "slot": item_slot }
         response = await self._client.post(f"/my/{character_name}/action/equip", json=payload)
         return await self.handle_status(response)

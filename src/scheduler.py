@@ -101,14 +101,21 @@ class ActionScheduler:
                 await asyncio.sleep(remaining_cooldown)
                                     
             # Execute the action
-            new_cooldown = await agent.perform(action)
+            result = await agent.perform(action)
 
             # Action failed if cooldown is negative
-            if new_cooldown < 0:
-                self.logger.warning(f"Action {action.type} failed for {agent.name}.")
-                return False
+            if not result.success:
+                self.logger.warning(f"[{agent.name}] Action {action.type} failed.")
+
+                if result.cascade:
+                    return False
+                else:
+                    # No need to update cooldown since the action failed, we can safely continue the action sequence
+                    self.logger.warning(f"[{agent.name}] Continuing action chain anyway...")
+                    return True
 
             # Update the agent's cooldown
+            new_cooldown = result.response.get("data").get("cooldown").get("remaining_seconds")
             agent.cooldown_expires_at = time.time() + new_cooldown
 
             # Check if the repeat until condition has been met for this action
@@ -191,7 +198,9 @@ class ActionScheduler:
             if condition_met:
                 self.logger.debug(f"[{agent.name}] Successfully met condition.")
             else:
-                self.logger.debug(f"[{agent.name}] Failed to meet condition.")
+                # Exception case where a 'failure' is due to a FOREVER condition
+                if expression.condition != ActionCondition.FOREVER:
+                    self.logger.debug(f"[{agent.name}] Failed to meet condition.")
 
             return condition_met
         else:

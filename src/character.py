@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Dict, Any
 from action import Action, ActionGroup, ActionCondition, CharacterAction
-from api import APIClient
+from api import APIClient, ActionResult
 import logging
 
 if TYPE_CHECKING:
@@ -55,7 +55,7 @@ class CharacterAgent:
         return True
     
 
-    async def perform(self, action: Action) -> float:
+    async def perform(self, action: Action) -> ActionResult:
         log_msg = f"[{self.name}] Performing action: {action.type.value}"
         if action.params:
             log_msg += f" with params {action.params}"
@@ -72,18 +72,18 @@ class CharacterAgent:
                     y = action.params["y"]
 
                 self.prev_location = (self.char_data["x"],  self.char_data["y"])
-                response: dict = await self.api_client.move(self.name, x, y)
+                result = await self.api_client.move(self.name, x, y)
 
             ## FIGHTING ##
             case CharacterAction.FIGHT:
-                response: dict = await self.api_client.fight(self.name)
+                result = await self.api_client.fight(self.name)
         
             case CharacterAction.REST:
-                response: dict = await self.api_client.rest(self.name)
+                result = await self.api_client.rest(self.name)
         
             ## GATHERING ##
             case CharacterAction.GATHER:
-                response: dict = await self.api_client.gather(self.name)
+                result = await self.api_client.gather(self.name)
         
             ## BANKING ##
             case CharacterAction.BANK_DEPOSIT_ITEM:
@@ -95,50 +95,48 @@ class CharacterAgent:
                         for deposit in action.params.get("items", []):
                             items_to_deposit.append({ "code": deposit["code"], "quantity": int(deposit["quantity"]) })
 
-                response: dict = await self.api_client.bank_deposit_item(self.name, items_to_deposit)
+                result = await self.api_client.bank_deposit_item(self.name, items_to_deposit)
                 
             case CharacterAction.BANK_WITHDRAW_ITEM:
                 match action.params.get("preset", "none"):
                     case "all":
                         items_to_withdraw = [{ "code": item["code"], "quantity": item["quantity"] } for item in self.char_data["inventory"] if item["code"] != '']
                     case _:
-                        items_to_deposit = []
-                        for deposit in action.params.get("items", []):
-                            items_to_deposit.append({ "code": deposit["code"], "quantity": int(deposit["quantity"]) })
+                        items_to_withdraw = []
+                        for withdraw in action.params.get("items", []):
+                            items_to_withdraw.append({ "code": withdraw["item_code"], "quantity": int(withdraw["quantity"]) })
 
-                response: dict = await self.api_client.bank_withdraw_item(self.name, items_to_withdraw)
+                result = await self.api_client.bank_withdraw_item(self.name, items_to_withdraw)
             
             case CharacterAction.BANK_DEPOSIT_GOLD:
                 quantity_to_deposit = action.params.get("quantity", 0)
-                response: dict = await self.api_client.bank_deposit_gold(self.name, quantity_to_deposit)
+                result = await self.api_client.bank_deposit_gold(self.name, quantity_to_deposit)
                 
             case CharacterAction.BANK_WITHDRAW_GOLD:
                 quantity_to_withdraw = action.params.get("quantity", 0)
-                response: dict = await self.api_client.bank_withdraw_gold(self.name, quantity_to_withdraw)
+                result = await self.api_client.bank_withdraw_gold(self.name, quantity_to_withdraw)
 
             ## EQUIPMENT ##
             case CharacterAction.EQUIP:
                 item_code = action.params.get("item_code")
                 item_slot = action.params.get("item_slot")
-                response: dict = await self.api_client.equip(self.name, item_code, item_slot)
+                result = await self.api_client.equip(self.name, item_code, item_slot)
 
             case CharacterAction.UNEQUIP:
                 item_slot = action.params.get("item_slot")
-                response: dict = await self.api_client.unequip(self.name, item_slot)
+                result = await self.api_client.unequip(self.name, item_slot)
 
             ## CRAFTING ##
             case CharacterAction.CRAFT:
                 item_code = action.params.get("item_code")
-                response: dict = await self.api_client.craft(self.name, item_code)
+                result = await self.api_client.craft(self.name, item_code)
         
             case _:
                 raise Exception(f"[{self.name}] Unknown action type: {action.type}")
             
         
-        if response:
-            self.char_data = response.get("data").get("character")
-            cooldown = response.get("data").get("cooldown").get("remaining_seconds")
-            return cooldown
-        else:
-            return -1
+        if result.success:
+            self.char_data = result.response.get("data").get("character")
+
+        return result
 
