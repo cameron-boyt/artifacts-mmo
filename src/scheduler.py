@@ -2,7 +2,7 @@ import asyncio
 import datetime
 import time
 from collections import deque
-from action import Action, ActionGroup, ActionCondition, ActionConditionExpression, LogicalOperator, ActionControlNode
+from action import Action, ActionGroup, ActionCondition, ActionConditionExpression, LogicalOperator, ControlOperator, ActionControlNode
 from character import CharacterAgent
 from api import APIClient
 import logging
@@ -74,59 +74,87 @@ class ActionScheduler:
                 await asyncio.sleep(0.5)
                 continue
 
-            # Pop the next action and process
+            # Pop the next node and process
             node = queue.popleft()
-            await self._process_action(agent, node)
+            await self._process_node(agent, node)
             self.logger.info(f"[{character_name}] Finished queued node.")
 
-    async def _process_action(self, agent: CharacterAgent, node: Action | ActionGroup | ActionControlNode) -> bool:
-        # If the node is a control node, derive the correct branch to take
-
-        ##TODO:
-        # REPEAT CONTROL BRANCH
-        
-        if isinstance(node, ActionControlNode):
-            action = self._evaluate_control_branches(agent, node)
+    async def _process_node(self, agent: CharacterAgent, node: Action | ActionGroup | ActionControlNode) -> bool:
+        if isinstance(node, Action):
+            success = await self._process_single_action(agent, node)
+        elif isinstance(node, ActionGroup):
+            success = await self._process_action_group(agent, node)
+        elif isinstance(node, ActionControlNode):
+            success = await self._process_control_node(agent, node)
         else:
-            action = node
+            raise Exception("Unrecognised node typing.")
 
+        return success
+
+    async def _process_single_action(self, agent: CharacterAgent, action: Action) -> bool:
+        """Process a single action to be made by an agent, repeating as defined."""
         while True:
-            if isinstance(action, Action):
-                # Wait for the remaining cooldown for the worker
-                remaining_cooldown = max(0, agent.cooldown_expires_at - time.time())
-                if remaining_cooldown > 0:
-                    self.logger.debug(f"[{agent.name}] Waiting for cooldown: {round(remaining_cooldown)}s.")
-                    await asyncio.sleep(remaining_cooldown)
-                                        
-                # Execute the action
-                new_cooldown = await agent.perform(action)
+            # Wait for the remaining cooldown for the worker
+            remaining_cooldown = max(0, agent.cooldown_expires_at - time.time())
+            if remaining_cooldown > 0:
+                self.logger.debug(f"[{agent.name}] Waiting for cooldown: {round(remaining_cooldown)}s.")
+                await asyncio.sleep(remaining_cooldown)
+                                    
+            # Execute the action
+            new_cooldown = await agent.perform(action)
 
-                # Action failed if cooldown is negative
-                if new_cooldown < 0:
-                    self.logger.warning(f"Action {action.type} failed for {agent.name}.")
-                    return False
+            # Action failed if cooldown is negative
+            if new_cooldown < 0:
+                self.logger.warning(f"Action {action.type} failed for {agent.name}.")
+                return False
 
-                agent.cooldown_expires_at = time.time() + new_cooldown
-            elif isinstance(action, ActionGroup):
-                # Traverse through the grouped actions and execute them in sequence
-                for sub_action in action.actions:
-                    sub_action_succesful = await self._process_action(agent, sub_action)
+            # Update the agent's cooldown
+            agent.cooldown_expires_at = time.time() + new_cooldown
 
-                    # If a sub_action was unsuccessful, discard the rest of the group
-                    if not sub_action_succesful:
-                        return False
-
-            # Check if a repeat condition has been defined for this action
-            if not action.until:
-                break
-            
-            # If so, try evaluate
+            # Check if the repeat until condition has been met for this action
             if self._evaluate_condition(agent, action.until):
                 break
 
         return True
 
+    async def _process_action_group(self, agent: CharacterAgent, action_group: ActionGroup) -> bool:
+        """Process an action group, sequencing through all child actions, repeating as defined."""
+        while True:
+            # Traverse through the grouped actions and execute them in sequence
+            for sub_action in action_group.actions:
+                sub_action_succesful = await self._process_node(agent, sub_action)
 
+                # If a sub_action was unsuccessful, discard the rest of the group
+                if not sub_action_succesful:
+                    return False
+                
+            # Check if the repeat until condition has been met for this action
+            if self._evaluate_condition(agent, action_group.until):
+                break
+
+        return True
+
+    async def _process_control_node(self, agent: CharacterAgent, control_node: ActionControlNode) -> bool:
+        """Process a control node, deciding on branching or control-specific looping behaviours."""
+        match control_node.control_operator:
+            case ControlOperator.IF:
+                branch = self._evaluate_control_branches(agent, control_node)
+                return await self._process_node(agent, branch)
+            
+            case ControlOperator.REPEAT:
+                while True:
+                    result = await self._process_node(agent, control_node.control_node)
+
+                    # Break out if the sub node has failed
+                    if not result:
+                        return result
+
+                    # Check if the repeat until condition has been met for this action
+                    if self._evaluate_condition(agent, control_node.until):
+                        break
+
+                return result
+                
     def _evaluate_control_branches(self, agent: CharacterAgent, control_node: ActionControlNode) -> Action | ActionGroup:
         for branch in control_node.branches:
             if self._evaluate_condition(agent, branch[0]):
@@ -134,9 +162,11 @@ class ActionScheduler:
             
         return control_node.fail_path
 
-
     def _evaluate_condition(self, agent: CharacterAgent, expression: ActionConditionExpression) -> bool:
-        """Evaluate a condition expression path."""        
+        """Evaluate a condition expression path."""
+        if not expression:
+            return True
+           
         if expression.is_leaf():
             # If at a leaf node, evaluate the condition
             self.logger.debug(f"[{agent.name}] Evaluating condition {expression.condition}")
@@ -144,7 +174,8 @@ class ActionScheduler:
             condition_met = False
             match expression.condition:
                 case ActionCondition.FOREVER:
-                    condition_met =  True
+                    # Forever meaning the condition will never be met, therefore FALSE.
+                    condition_met = False
                 
                 case ActionCondition.INVENTORY_FULL:
                     condition_met = agent.is_inventory_full()
