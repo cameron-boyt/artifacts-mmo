@@ -55,6 +55,23 @@ class ActionConditionExpression:
     parameters: Dict[str, Any] = field(default_factory=dict)
     children: List["ActionConditionExpression"] = field(default_factory=list)
 
+    def __post_init__(self):
+        if self.operator:
+            # Is a logical node
+            assert(self.condition is None)
+
+            if self.operator == LogicalOperator.NOT:
+                # NOT nodes can only have one child
+                assert(self.children and len(self.children) == 1)
+            else:
+                # Other logical nodes must have at least 2 children
+                assert(self.children and len(self.children) >= 2)
+        
+        if not self.operator:
+            # Is a leaf node
+            assert(self.condition is not None)
+            assert(not self.children)
+
     def is_leaf(self) -> bool:
         return self.condition is not None
 
@@ -65,3 +82,26 @@ class ActionControlNode:
     fail_path: ActionConditionExpression | None
     control_node: ActionControlNode | None
     until: ActionConditionExpression | None
+
+    def __post_init__(self):
+        if self.control_operator == ControlOperator.IF:
+            # There must be at least one branch
+            assert(self.branches and len(self.branches) > 0)
+
+            # There must be a fail_path defined
+            assert(self.fail_path)
+
+            # There should be no child control_node or until condition defined
+            assert(self.control_node is None)
+            assert(self.until is None)
+        
+        if self.control_operator == ControlOperator.REPEAT:
+            # A control_node must be defined
+            assert(self.control_node is not None)
+
+            # An until condition must be defined
+            assert(self.until)
+
+            # There should be no decision branches or fail_path defined
+            assert(self.branches is None)
+            assert(self.fail_path is None)
