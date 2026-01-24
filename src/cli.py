@@ -5,7 +5,7 @@ from condition_factories import *
 from control_factories import *
 from api import APIClient
 from scheduler import ActionScheduler
-from planner import ActionPlanner, ActionIntent, Intention
+from planner import ActionPlanner, ActionIntent, Intention, ItemQuantity, ItemSelection, intent_group
 import logging
 import json
 
@@ -202,35 +202,50 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str, inte
             scheduler.get_status()
             
         case 'move':
-            action = move(prev_location=True) if args[0] == "prev" else move(x=args[0], y=args[1])
-            scheduler.queue_action_node(character_name, action)
+            if len(args) == 1 and args[0] == "prev":
+                node = planner.plan(agent, Intention.MOVE, prev_location=True)
+            else:
+                node = planner.plan(agent, Intention.MOVE)
+
+            scheduler.queue_action_node(character_name, node)
 
         case 'fight':
-            scheduler.queue_action_node(character_name, fight())
+            if len(args) == 1:
+                node = planner.plan(agent, ActionIntent(Intention.FIGHT, monster=args[0]))
+            else:
+                node = planner.plan(agent, ActionIntent(Intention.FIGHT))
+            
+            scheduler.queue_action_node(character_name, node)
 
         case 'rest':
-            scheduler.queue_action_node(character_name, rest())
+            node = planner.plan(agent, Intention.REST)
+            scheduler.queue_action_node(character_name, node)
 
         case 'gather':
             if len(args) == 1:
-                resource = args[0]
-                action = planner.plan_intent(agent, ActionIntent(Intention.GATHER, params={"resource": resource}))
+                node = planner.plan(agent, ActionIntent(Intention.GATHER, resource=args[0]))
             else:
-                action = planner.plan_intent(agent, ActionIntent(Intention.GATHER))
+                node = planner.plan(agent, ActionIntent(Intention.GATHER))
             
-            scheduler.queue_action_node(character_name, action)
+            scheduler.queue_action_node(character_name, node)
 
-        case 'equip':                
-            action = equip(items_code=args[0], item_slot=args[1])
-            scheduler.queue_action_node(character_name, action)
+        case 'equip':
+            if len(args) == 2:
+                node = planner.plan(agent, Intention.EQUIP, items=args[0], slot=args[1])
+                scheduler.queue_action_node(character_name, node)
 
         case 'unequip':
-            action = unequip(item_slot=args[0])
-            scheduler.queue_action_node(character_name, action)
+            if len(args) == 1:
+                node = planner.plan(agent, Intention.UNEQUIP, slot=args[1])
+                scheduler.queue_action_node(character_name, node)
 
         case 'craft':
-            action = craft(item_code=args[0], quantity=args[1])
-            scheduler.queue_action_node(character_name, action)
+            if len(args) == 2:
+                node = planner.plan(agent, Intention.CRAFT, item=args[0], quantity=args[1])
+                scheduler.queue_action_node(character_name, node)
+            elif len(args) == 1:
+                node = planner.plan(agent, Intention.CRAFT, item=args[0], quantity=1)
+                scheduler.queue_action_node(character_name, node)
 
         case 'bank':
             if args[0] == 'deposit' and args[1] == 'gold':
@@ -259,47 +274,29 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str, inte
 
         # create combo actions
         case 'gather_endless':
-            action_group = group(
-                gather(until=cond(ActionCondition.INVENTORY_FULL)),
-                move(x=4, y=1),
-                bank_all_items(),
-                move(prev_location=True),
+            node = action_group(
+                planner.plan(agent, ActionIntent(Intention.GATHER, until=cond(ActionCondition.INVENTORY_FULL))),
+                planner.plan(agent, ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
                 until=cond(ActionCondition.FOREVER)
             )
-            scheduler.queue_action_node(character_name, action_group)
+            scheduler.queue_action_node(character_name, node)
 
         case 'fight_endless':
-            action_group = group(
-                group(
-                    fight(),
-                    rest(),
-                    until=cond(ActionCondition.INVENTORY_FULL)
-                ),
-                move(x=4, y=1),
-                bank_all_items(),
-                move(prev_location=True),
+            node = action_group(
+                planner.plan(agent, ActionIntent(Intention.FIGHT_THEN_REST, monster="chicken", until=cond(ActionCondition.INVENTORY_FULL))),
+                planner.plan(agent, ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
                 until=cond(ActionCondition.FOREVER)
             )
-            scheduler.queue_action_node(character_name, action_group)
+            scheduler.queue_action_node(character_name, node)
 
         # tests
         case 'test':
-            node = REPEAT(
-                IF(
-                    (
-                        cond(ActionCondition.BANK_HAS_ITEM_OF_QUANTITY, item_code='copper_ore', quantity=10),                    
-                        group(
-                            planner.plan_intent(agent, ActionIntent(Intention.WITHDRAW, item="copper_ore", quantity=10)),
-                            planner.plan_intent(agent, ActionIntent(Intention.CRAFT, item="copper_bar", quantity=1))
-                        )
-                    ),
-                    fail_path=planner.plan_intent(agent, ActionIntent(Intention.FIGHT, monster="chicken"))
-                ), 
+            node = REPEAT(                  
+                planner.plan(agent, ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item="copper_bar", quantity=1)),
                 until=cond(ActionCondition.FOREVER)
             )
 
             scheduler.queue_action_node(character_name, node)
-
 
 if __name__ == '__main__':
     asyncio.run(main())

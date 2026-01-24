@@ -1,7 +1,7 @@
 from action import Action, ActionGroup, CharacterAction, ActionConditionExpression
 
 ## Grouping Factory
-def group(*actions: Action | ActionGroup, until: ActionConditionExpression | None = None) -> ActionGroup:
+def action_group(*actions: Action | ActionGroup, until: ActionConditionExpression | None = None) -> ActionGroup:
     return ActionGroup(actions=actions, until=until)
 
 ## Base Action Factories
