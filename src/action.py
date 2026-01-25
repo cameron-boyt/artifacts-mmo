@@ -23,7 +23,11 @@ class CharacterAction(Enum):
 class ActionCondition(Enum):
     NONE = auto()
     INVENTORY_FULL = auto()
+    INVENTORY_HAS_AVAILABLE_SPACE = auto()
+    INVENTORY_HAS_AVAILABLE_SPACE_FOR_ITEM_OF_QUANTITY = auto()
     BANK_HAS_ITEM_OF_QUANTITY = auto()
+    INVENTORY_HAS_ITEM_OF_QUANTITY = auto()
+    BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY = auto()
     FOREVER = auto()
 
 class LogicalOperator(Enum):

@@ -97,8 +97,8 @@ class APIClient:
         response = await self._client.post(f"/my/{character_name}/action/unequip", json=payload)
         return await self.handle_status(response)
 
-    async def craft(self, character_name: str, item_slot: str) -> ActionResult:
-        payload = { "code": item_slot }
+    async def craft(self, character_name: str, item_code: str, quantity: int = 1) -> ActionResult:
+        payload = { "code": item_code, "quantity": quantity }
         response = await self._client.post(f"/my/{character_name}/action/crafting", json=payload)
         return await self.handle_status(response)
 

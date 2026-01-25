@@ -7,6 +7,8 @@ from control_factories import *
 from dataclasses import dataclass
 from action_factories import *
 from enum import Enum, auto
+from worldstate import WorldState
+from helpers import *
 
 class Intention(Enum):
     MOVE = auto()
@@ -41,49 +43,13 @@ class ActionIntent:
         self.params = params
         self.until = until
 
-@dataclass
-class ItemQuantity:
-    max: int | None = None
-    min: int | None = None
-    multiple_of: int | None = None
-    all: bool | None = None
-
-    def __post_init__(self):
-        if self.all:
-            # If requesting all of an item, forbid a min/max selection
-            assert(not self.max)
-            assert(not self.min)
-
-        if not self.all:
-            # If not requesting all of an item, require a min or max selection
-            assert(self.max > 0 or self.min > 0)
-
-@dataclass
-class ItemSelection:
-    item: str
-    quantity: ItemQuantity
-
 class ActionPlanner:
     """Interprets action intent and generates action plans."""
-    def __init__(self, world_data: Dict, bank_data: Dict):
+    def __init__(self, world_state: WorldState):
         self.logger = logging.getLogger(__name__)
 
-        self.world_data: Dict[str, Dict] = world_data
-        self.bank_data: Dict[str, Dict] = bank_data
+        self.world_state = world_state
 
-    def _get_locations_of_resource(self, resource: str) -> str:
-        resource_tile = self.world_data["resources"][resource]
-
-        locations = []
-        for tile in resource_tile:
-            locations.extend(self.world_data["interactions"]["resource"][tile])
-
-        return locations
-
-    def _get_locations_of_monster(self, monster: str) -> str:
-        locations = self.world_data["interactions"]["monster"][monster]
-        return locations
-    
     def _construct_item_list(self, selection: List[ItemSelection]) -> List[Dict]:
         items = []
         for item in selection:
@@ -92,18 +58,14 @@ class ActionPlanner:
                 continue
 
             items.append({
-                "item_code": item.item,
+                "item": item.item,
                 "quantity": quantity
             })
 
         return items
     
-    def _bank_contains_items(self, items: List[ItemSelection]) -> bool:
-        #TODO: Implement
-        return True
-    
     def _get_desired_item_quantity(self, item: ItemSelection) -> int:
-        available_quantity = self.bank_data[item.item]["quantity"]
+        available_quantity = self.world_state.get_amount_of_item_in_bank(item.item)
 
         # Get all available quantity, or clamp the quantity within the bound min/max attributes
         if item.quantity.all:
@@ -111,6 +73,10 @@ class ActionPlanner:
         else:
             quantity = min(item.quantity.max, max(item.quantity.min, available_quantity))
 
+            # Check we're not trying to take more than we have
+            if quantity > available_quantity:
+                return 0
+            
         # If set, apply a 'mutiple of' rounding; i.e. get quantity in multiples of 5, 10 etc.
         if item.quantity.multiple_of:
             quantity = (quantity // item.quantity.multiple_of) * item.quantity.multiple_of
@@ -128,10 +94,9 @@ class ActionPlanner:
             
             case Intention.FIGHT:
                 if monster := intent.params.get("monster"):
-                    resource_locations = self._get_locations_of_monster(monster)
-                    x, y = agent.get_closest_location(resource_locations)
+                    monster_locations = self.world_state.get_locations_of_monster(monster)
                     return action_group(
-                        move(x=x, y=y),
+                        move(closest_location_of=monster_locations),
                         fight(until=intent.until)
                     )
                 else:
@@ -142,10 +107,9 @@ class ActionPlanner:
             
             case Intention.GATHER:
                 if resource := intent.params.get("resource"):
-                    resource_locations = self._get_locations_of_resource(resource)
-                    x, y = agent.get_closest_location(resource_locations)
+                    resource_locations = self.world_state.get_locations_of_resource(resource)
                     return action_group(
-                        move(x=x, y=y),
+                        move(closest_location_of=resource_locations),
                         gather(until=intent.until)
                     )
                 else:
@@ -156,9 +120,8 @@ class ActionPlanner:
                 quantity = intent.params.get("quantity")
                 skill_workshop = self.world_data["items"][item]["craft"]["skill"]
                 crafting_locations = self.world_data["interactions"]["workshop"][skill_workshop]
-                x, y = agent.get_closest_location(crafting_locations)
                 return action_group(
-                    move(x=x, y=y),
+                    move(closet_location_of=crafting_locations),
                     craft(item_code=item, quantity=quantity)
                 )
             
@@ -174,32 +137,27 @@ class ActionPlanner:
             case Intention.WITHDRAW:
                 items: List[ItemSelection] = intent.params.get("items")
                 items_to_withdraw = self._construct_item_list(items)
-
-                resource_locations = self.world_data["interactions"]["bank"]["bank"]
-                x, y = agent.get_closest_location(resource_locations)
+                bank_locations = self.world_state.get_bank_locations()
                 return action_group(
-                    move(x=x, y=y),
+                    move(closest_location_of=bank_locations),
                     bank_withdraw_item(items=items_to_withdraw)
                 )
             
             case Intention.DEPOSIT:
                 items: List[ItemSelection] = intent.params.get("items")
                 items_to_deposit = self._construct_item_list(items)
-        
-                resource_locations = self.world_data["interactions"]["bank"]["bank"]
-                x, y = agent.get_closest_location(resource_locations)
+                bank_locations = self.world_state.get_bank_locations()
                 return action_group(
-                    move(x=x, y=y),
+                    move(closest_location_of=bank_locations),
                     bank_deposit_item(items=items_to_deposit)
                 )
             
             # Complex Intentions
             case Intention.FIGHT_THEN_REST:
                 if monster := intent.params.get("monster"):
-                    resource_locations = self._get_locations_of_monster(monster)
-                    x, y = agent.get_closest_location(resource_locations)
+                    monster_locations = self.world_state.get_locations_of_monster(monster)
                     return action_group(
-                        move(x=x, y=y),
+                        move(closest_location_of=monster_locations),
                         action_group(
                             fight(),
                             rest(),
@@ -221,57 +179,124 @@ class ActionPlanner:
                     items_to_deposit = self._construct_item_list(items)
                     bank_action = bank_deposit_item(items=items_to_deposit)
         
-                resource_locations = self.world_data["interactions"]["bank"]["bank"]
-                x, y = agent.get_closest_location(resource_locations)
+                bank_locations = self.world_state.get_bank_locations()
                 return action_group(
-                    move(x=x, y=y),
+                    move(closest_location_of=bank_locations),
                     bank_action,
                     move(prev=True)
                 )
 
             case Intention.CRAFT_OR_GATHER_INTERMEDIARIES:
                 item = intent.params.get("item")
-                quantity = intent.params.get("quantity")
+                quantity = intent.params.get("quantity", 0)
+                as_many_as_possible = intent.params.get("as_many_as_possible", False)
 
-                required_materials = self.world_data["items"][item]["craft"]["materials"]
-                item_selection = [ItemSelection(material["code"], ItemQuantity(min=material["quantity"])) for material in required_materials]
+                required_materials = self.world_state.get_crafting_materials_for_item(item)
+                item_selection = [
+                    ItemSelection(m["item"], ItemQuantity(min=m["quantity"], max=m["quantity"])) 
+                    for m in required_materials
+                ]
                 
                 # Constuct list of items to withdraw from the bank
                 items_to_withdraw = self._construct_item_list(item_selection)
 
-                # Get location of the closest bank
-                bank_locations = self.world_data["interactions"]["bank"]["bank"]
-                b_x, b_y = agent.get_closest_location(bank_locations)
+                # Get location of the banks
+                bank_locations = self.world_state.get_bank_locations()
 
-                # Get the location of the closest crafting station
-                skill_workshop = self.world_data["items"][item]["craft"]["skill"]
-                crafting_locations = self.world_data["interactions"]["workshop"][skill_workshop]
-                w_x, w_y = agent.get_closest_location(crafting_locations)
+                # Get the location of the crafting stations
+                skill_workshop = self.world_state.get_workshop_for_item(item)
+                workshop_locations = self.world_state.get_workshop_locations(skill_workshop)
 
-                # Get the items to gather in case of a fallback
-                item_to_gather = required_materials[0]["code"]
-                quantity_to_gather = required_materials[0]["quantity"]
+                # Get the locations of items to gather incase of fallback
+                fallback_actions = []
+                for material in required_materials:
+                    item_to_gather = material["item"]
+                    quantity_to_gather = material["quantity"]
 
-                # Get the location of the closest source of this item
-                resource_locations = self._get_locations_of_resource(item_to_gather)
-                g_x, g_y = agent.get_closest_location(resource_locations)
+                    # Get the location of the closest source of this item
+                    resource_locations = self.world_state.get_locations_of_resource(item_to_gather)
+
+                    fallback_actions.extend([
+                        move(closest_location_of=resource_locations),
+                        gather(until=cond(ActionCondition.INVENTORY_FULL)),
+                        move(closest_location_of=bank_locations),
+                        bank_all_items()
+                    ])
+
+                ## Construct main body conditions
+                # First, check if we have the items available in our inventory alone
+                if len(required_materials) == 1:
+                    inv_only_main_condition = cond(
+                        ActionCondition.INVENTORY_HAS_ITEM_OF_QUANTITY,
+                        item=required_materials[0]["item"],
+                        quantity=required_materials[0]["quantity"] * quantity
+                    )
+                else:
+                    inv_only_main_condition = AND(*[
+                        cond(
+                            ActionCondition.INVENTORY_HAS_ITEM_OF_QUANTITY,
+                            item=material["item"],
+                            quantity=material["quantity"] * quantity
+                        )
+                        for material in required_materials
+                    ])
+
+                # Second, check if combined in the inventory and bank we have the items
+                if len(required_materials) == 1:
+                    inv_and_bank_main_condition = cond(
+                        ActionCondition.BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY,
+                        item=required_materials[0]["item"],
+                        quantity=required_materials[0]["quantity"] * quantity
+                    )
+                else:
+                    inv_and_bank_main_condition = AND(*[
+                        cond(
+                            ActionCondition.BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY,
+                            item=material["item"],
+                            quantity=material["quantity"] * quantity
+                        )
+                        for material in required_materials
+                    ])
+
+                # Third, check if we actually have enough space in the inventory to withdraw
+                inv_has_space_for_items_condition = cond(
+                    ActionCondition.INVENTORY_HAS_AVAILABLE_SPACE_FOR_ITEM_OF_QUANTITY,
+                    items=required_materials
+                )
+
+                # Construct fallback for when we don't have enough inventory space
+                no_inv_space_fail_path_actions = action_group(
+                    move(closest_location_of=bank_locations),
+                    bank_deposit_item(preset='all'),
+                    bank_withdraw_item(items=items_to_withdraw, needed_quantity_only=True)
+                )
+
+                # Construct bank and withdraw action plan
+                to_bank_and_withdraw_actions = action_group(
+                    move(closest_location_of=bank_locations),
+                    bank_withdraw_item(items=items_to_withdraw, withdraw_until_inv_full=True, needed_quantity_only=True)
+                )
+
+                # Construct move to workshop and craft action plan
+                to_workshop_and_craft_actions = action_group(
+                    move(closest_location_of=workshop_locations),
+                    craft(item=item, quantity=quantity)
+                )
+
+                
+
+                # Construct fail path action plan
+                fail_path_actions = action_group(
+                    *fallback_actions
+                )
                 
                 return IF(
-                    (
-                        AND(*[
-                            cond(ActionCondition.BANK_HAS_ITEM_OF_QUANTITY, item=material["code"], quantity=material["quantity"])
-                            for material in required_materials
-                        ]),
-                        action_group(
-                            move(x=b_x, y=b_y),
-                            bank_withdraw_item(items=items_to_withdraw),
-                            move(x=w_x, y=w_y),
-                            craft(item=item, quantity=quantity)
-                        )
-                    ), fail_path=action_group(
-                            move(x=g_x, y=g_y),
-                            gather(until=cond(ActionCondition.BANK_HAS_ITEM_OF_QUANTITY, item=item_to_gather, quantity=quantity_to_gather))
-                    )
+                    (inv_only_main_condition, to_workshop_and_craft_actions),
+                    (inv_and_bank_main_condition, IF(
+                        (inv_has_space_for_items_condition, action_group(to_bank_and_withdraw_actions, to_workshop_and_craft_actions)),
+                        fail_path=no_inv_space_fail_path_actions
+                    )),
+                    fail_path=fail_path_actions
                 )
                 
             case _:

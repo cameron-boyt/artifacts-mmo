@@ -5,13 +5,14 @@ from condition_factories import *
 from control_factories import *
 from api import APIClient
 from scheduler import ActionScheduler
-from planner import ActionPlanner, ActionIntent, Intention, ItemQuantity, ItemSelection, intent_group
+from planner import ActionPlanner, ActionIntent, Intention, ItemQuantity, ItemSelection
+from worldstate import WorldState
 import logging
 import json
-
+import re
 
 def get_token() -> str:
-    with open("C:/Users/Cameron/Desktop/Artifacts/token.txt", 'r') as f:
+    with open("C:/Users/Cameron/Desktop/ArtifactsMMO/artifacts-mmo/token.txt", 'r') as f:
         TOKEN = f.read().strip()
 
     return TOKEN
@@ -46,13 +47,7 @@ async def get_item_data(api: APIClient, query_api: bool = False) -> Dict[str, Di
         with open('item_data.json', 'r') as f:
             all_item_data = json.loads(f.read())
 
-    # Parse it
-    items = {}
-    for item in all_item_data:
-        item_code = item["code"]
-        items[item_code] = item
-
-    return items 
+    return all_item_data
 
 async def get_map_data(api: APIClient, query_api: bool = False) -> Dict[str, Dict]:
     if query_api:
@@ -70,27 +65,7 @@ async def get_map_data(api: APIClient, query_api: bool = False) -> Dict[str, Dic
         with open('map_data.json', 'r') as f:
             all_map_data = json.loads(f.read())
 
-    # Parse it
-    interactions: Dict[str, Dict] = {
-        "resource": {},
-        "monster": {},
-        "workshop": {},
-        "bank": {},
-        "grand_exchange": {},
-        "tasks_master": {},
-        "npc": {},
-    }
-
-    for map_tile in all_map_data:
-        content_data = map_tile.get("interactions", {}).get("content", None)
-
-        if content_data:
-            content_type = content_data["type"]
-            content_code = content_data["code"]
-            x, y = map_tile["x"], map_tile["y"]
-            interactions[content_type].setdefault(content_code, []).append((x, y))
-
-    return interactions 
+    return all_map_data
 
 async def get_resource_data(api: APIClient, query_api: bool = False) -> Dict[str, Dict]:
     if query_api:
@@ -108,13 +83,7 @@ async def get_resource_data(api: APIClient, query_api: bool = False) -> Dict[str
         with open('resource_data.json', 'r') as f:
             all_resource_data = json.loads(f.read())
 
-    # Parse it
-    resource_sources = {}
-    for resource in all_resource_data:
-        for drop in resource["drops"]:
-            resource_sources.setdefault(drop["code"], set()).add(resource["code"])
-
-    return resource_sources 
+    return all_resource_data
 
 async def get_monster_data(api: APIClient, query_api: bool = False) -> Dict[str, Dict]:
     if query_api:
@@ -132,13 +101,7 @@ async def get_monster_data(api: APIClient, query_api: bool = False) -> Dict[str,
         with open('monster_data.json', 'r') as f:
             all_monster_data = json.loads(f.read())
 
-    # Parse it
-    monster_sources = {}
-    for monster in all_monster_data:
-        for drop in monster["drops"]:
-            monster_sources.setdefault(drop["code"], set()).add(monster["code"])
-
-    return monster_sources 
+    return all_monster_data
 
 async def main():
     logging.basicConfig(
@@ -162,30 +125,25 @@ async def main():
     GET_API_DATA = False
     bank_data = await get_bank_data(api, GET_API_DATA)
     item_data = await get_item_data(api, GET_API_DATA)
-    interactions = await get_map_data(api, GET_API_DATA)
-    resource_drop_data = await get_resource_data(api, GET_API_DATA)
-    monster_drop_data = await get_monster_data(api, GET_API_DATA)
+    map_data = await get_map_data(api, GET_API_DATA)
+    resource_data = await get_resource_data(api, GET_API_DATA)
+    monster_data = await get_monster_data(api, GET_API_DATA)
 
-    world_data = {
-        'interactions': interactions,
-        'items': item_data,
-        'resources': resource_drop_data,
-        'monsters': monster_drop_data
-    }
+    world_state = WorldState(bank_data, map_data, item_data, resource_data, monster_data)
 
     scheduler = ActionScheduler(api)
-    planner = ActionPlanner(world_data)
+    planner = ActionPlanner(world_state)
 
     characters = await api.get_characters()
     for character in characters["data"]:
-        scheduler.add_character(character, bank_data)
+        scheduler.add_character(character, world_state)
 
     while True:
         c = await asyncio.to_thread(input, "Enter Command: ")
-        parse_input(planner, scheduler, c, world_data)
+        parse_input(planner, scheduler, c)
     
 
-def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str, interactions: Dict):
+def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str):
     data = c.split() 
     character_name = data[0].title().strip()
     action_kw = data[1].lower().strip()
@@ -273,25 +231,56 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str, inte
             scheduler.queue_action_node(character_name, action)
 
         # create combo actions
-        case 'gather_endless':
+        case 'gather-forever':
+            if len(args) == 1:
+                gather_plan = planner.plan(agent, ActionIntent(Intention.GATHER, resource=args[0], until=cond(ActionCondition.INVENTORY_FULL)))
+            else:
+                gather_plan = planner.plan(agent, ActionIntent(Intention.GATHER, until=cond(ActionCondition.INVENTORY_FULL)))
+            
             node = action_group(
-                planner.plan(agent, ActionIntent(Intention.GATHER, until=cond(ActionCondition.INVENTORY_FULL))),
+                planner.plan(agent, ActionIntent(Intention.PREPARE_FOR_GATHERING)),
+                gather_plan,
                 planner.plan(agent, ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
                 until=cond(ActionCondition.FOREVER)
             )
             scheduler.queue_action_node(character_name, node)
 
-        case 'fight_endless':
+        case 'fight-forever':
+            if len(args) == 1:
+                fight_plan = planner.plan(agent, ActionIntent(Intention.FIGHT_THEN_REST, monster=args[0], until=cond(ActionCondition.INVENTORY_FULL)))
+            else:
+                fight_plan = planner.plan(agent, ActionIntent(Intention.FIGHT_THEN_REST, until=cond(ActionCondition.INVENTORY_FULL)))
+
             node = action_group(
-                planner.plan(agent, ActionIntent(Intention.FIGHT_THEN_REST, monster="chicken", until=cond(ActionCondition.INVENTORY_FULL))),
+                fight_plan,
                 planner.plan(agent, ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
                 until=cond(ActionCondition.FOREVER)
             )
             scheduler.queue_action_node(character_name, node)
+
+        case 'craft-or-gather':
+            if len(args) == 2:
+                item = args[0]
+
+                if re.match(r'\d+', args[1]):
+                    quantity = int(args[1])
+                    node = REPEAT(
+                        planner.plan(agent, ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=item, quantity=quantity)),
+                        until=cond(ActionCondition.FOREVER)
+                    )
+                elif re.match(r'max', args[1]):
+                    node = REPEAT(
+                        planner.plan(agent, ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=item, as_many_as_possible=True)),
+                        until=cond(ActionCondition.FOREVER)
+                    )
+                else:
+                    raise Exception("Invalid quantity argument.")
+                
+                scheduler.queue_action_node(character_name, node)
 
         # tests
         case 'test':
-            node = REPEAT(                  
+            node = REPEAT(
                 planner.plan(agent, ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item="copper_bar", quantity=1)),
                 until=cond(ActionCondition.FOREVER)
             )

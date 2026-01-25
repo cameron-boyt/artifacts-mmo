@@ -2,13 +2,14 @@ from typing import TYPE_CHECKING, Dict, List, Tuple, Any
 from action import Action, ActionGroup, ActionCondition, CharacterAction
 from api import APIClient, ActionResult
 import logging
+from worldstate import WorldState
 
 if TYPE_CHECKING:
     from src.scheduler import ActionScheduler
 
 class CharacterAgent:
     """Represents a single character, holding its state and execution logic."""
-    def __init__(self, character_data: Dict[str, Any], bank_data: Dict[str, Any], api_client: APIClient, scheduler: ActionScheduler):
+    def __init__(self, character_data: Dict[str, Any], world_state: WorldState, api_client: APIClient, scheduler: ActionScheduler):
         self.logger = logging.getLogger(__name__)
         
         self.api_client: APIClient = api_client
@@ -16,7 +17,7 @@ class CharacterAgent:
 
         self.name = character_data["name"]
         self.char_data: Dict[str, Any] = character_data
-        self.bank_data = bank_data
+        self.world_state = world_state
 
         self.is_autonomous: bool = False
         self.cooldown_expires_at: float = 0.0
@@ -36,6 +37,22 @@ class CharacterAgent:
                 best_location = location
 
         return best_location
+    
+    def get_quantity_of_item_in_inventory(self, item: str) -> int:
+        """Get the quantity of an item in the agent's inventory."""
+        for item_data in self.char_data["inventory"]:
+            if item_data["code"] == item:
+                return item_data["quantity"]
+
+        return 0
+    
+    def get_quantity_of_item_in_bank(self, item: str) -> int:
+        """Get the quantity of an item in the agent's bank."""
+        if item in self.world_state._bank_data:
+            return self.world_state._bank_data[item]
+
+        return 0
+
 
     ## Condition Checkers
     def is_inventory_full(self) -> bool:
@@ -43,14 +60,26 @@ class CharacterAgent:
         item_count = sum(item["quantity"] for item in self.char_data["inventory"])
         return item_count >= self.char_data["inventory_max_items"]
     
-    def bank_has_item_of_quantity(self, item_code: str, quantity: int) -> bool:
-        """Check if the agent's bank has an item of at least a specific quantity."""
-        for item in self.bank_data:
-            if item["code"] == item_code:
-                if item["quantity"] >= quantity:
-                    return True
+    def inventory_has_available_space(self, spaces: int) -> bool:
+        """Check if the agent's inventory has a number of space available."""
+        item_count = sum(item["quantity"] for item in self.char_data["inventory"])
+        return self.char_data["inventory_max_items"] - item_count >= spaces
+    
+    def inventory_has_item_of_quantity(self, item: str, quantity: int) -> bool:
+        """Check if the agent's inventory has an item of at least a specific quantity."""
+        inv_quantity = self.get_quantity_of_item_in_inventory(item)
+        return inv_quantity >= quantity
 
-        return False
+    def bank_has_item_of_quantity(self, item: str, quantity: int) -> bool:
+        """Check if the agent's bank has an item of at least a specific quantity."""
+        bank_quantity = self.get_quantity_of_item_in_bank(item)
+        return bank_quantity >= quantity
+    
+    def bank_and_inventory_have_item_of_quantity(self, item: str, quantity: int) -> bool:
+        """Check if the agent's bank and inventory have a combined amount of an item of at least a specific quantity."""
+        inv_quantity = self.get_quantity_of_item_in_inventory(item)
+        bank_quantity = self.get_quantity_of_item_in_bank(item)
+        return inv_quantity + bank_quantity >= quantity
     
 
     ## Action Performance
@@ -63,9 +92,11 @@ class CharacterAgent:
         match action.type:
             ## MOVING ##
             case CharacterAction.MOVE:
-                if "prev_location" in action.params:
+                if action.params.get("prev_location", False):
                     x = self.prev_location[0]
                     y = self.prev_location[1]
+                elif locations := action.params.get("closest_location_of", []):
+                    x, y = self.get_closest_location(locations)
                 else:
                     x = action.params["x"]
                     y = action.params["y"]
@@ -92,18 +123,21 @@ class CharacterAgent:
                     case _:
                         items_to_deposit = []
                         for deposit in action.params.get("items", []):
-                            items_to_deposit.append({ "code": deposit["code"], "quantity": int(deposit["quantity"]) })
+                            items_to_deposit.append({ "code": deposit["item"], "quantity": int(deposit["quantity"]) })
 
                 result = await self.api_client.bank_deposit_item(self.name, items_to_deposit)
                 
             case CharacterAction.BANK_WITHDRAW_ITEM:
                 match action.params.get("preset", "none"):
-                    case "all":
-                        items_to_withdraw = [{ "code": item["code"], "quantity": item["quantity"] } for item in self.char_data["inventory"] if item["code"] != '']
                     case _:
                         items_to_withdraw = []
                         for withdraw in action.params.get("items", []):
-                            items_to_withdraw.append({ "code": withdraw["item_code"], "quantity": int(withdraw["quantity"]) })
+                            quantity_to_withdraw = int(withdraw["quantity"])
+                            if action.params.get("needed_quantity_only", False):
+                                quantity_in_inv = self.get_quantity_of_item_in_inventory(withdraw["item"])
+                                quantity_to_withdraw = quantity_to_withdraw - quantity_in_inv
+
+                            items_to_withdraw.append({ "code": withdraw["item"], "quantity": quantity_to_withdraw })
 
                 result = await self.api_client.bank_withdraw_item(self.name, items_to_withdraw)
             
@@ -117,18 +151,19 @@ class CharacterAgent:
 
             ## EQUIPMENT ##
             case CharacterAction.EQUIP:
-                item_code = action.params.get("item_code")
-                item_slot = action.params.get("item_slot")
+                item_code = action.params.get("item")
+                item_slot = action.params.get("slot")
                 result = await self.api_client.equip(self.name, item_code, item_slot)
 
             case CharacterAction.UNEQUIP:
-                item_slot = action.params.get("item_slot")
+                item_slot = action.params.get("slot")
                 result = await self.api_client.unequip(self.name, item_slot)
 
             ## CRAFTING ##
             case CharacterAction.CRAFT:
-                item_code = action.params.get("item_code")
-                result = await self.api_client.craft(self.name, item_code)
+                item_code = action.params.get("item")
+                quantity = action.params.get("quantity", 1)
+                result = await self.api_client.craft(self.name, item_code, quantity)
         
             case _:
                 raise Exception(f"[{self.name}] Unknown action type: {action.type}")

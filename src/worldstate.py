@@ -1,0 +1,125 @@
+from dataclasses import dataclass
+from typing import Dict, List, Set, Tuple
+import logging
+from helpers import *
+
+type LocationSet = Set[Tuple[int, int]]
+
+@dataclass
+class WorldInteractions:
+    resources: Dict[str, LocationSet]
+    monsters: Dict[str, LocationSet]
+    workshops: Dict[str, LocationSet]
+    banks: Dict[str, LocationSet]
+    grand_exchanges: Dict[str, LocationSet]
+    tasks_masters: Dict[str, LocationSet]
+    npcs: Dict[str, LocationSet]
+
+@dataclass
+class WorldState:
+    def __init__(self, bank_data: Dict, map_data: Dict, item_data: Dict, resource_data: Dict, monster_data: Dict):
+        self.logger = logging.getLogger(__name__)
+
+        self._bank_data: Dict[str, int] = {b["code"]: b["quantity"] for b in bank_data}
+        self._map_data = map_data
+        self._item_data: Dict[str, Dict] = {i["code"]: i for i in item_data}
+        self._resource_data = resource_data
+        self._monster_data = monster_data
+
+        self._interactions: WorldInteractions = None
+        self._resource_sources = {}
+        self._drop_sources = {}
+
+        self.__post_init__()
+
+    def __post_init__(self):
+        self._interactions = self._generate_interations()
+        self._resource_source = self._generate_resource_sources()
+        self._drop_sources = self._generate_monster_drop_sources()
+
+    def _generate_interations(self):
+        interactions = {}
+
+        for map_tile in self._map_data:
+            content_data = map_tile.get("interactions", {}).get("content", None)
+
+            if content_data:
+                content_type = content_data["type"]
+                content_code = content_data["code"]
+                x, y = map_tile["x"], map_tile["y"]
+                interactions.setdefault(content_type, {}).setdefault(content_code, set()).add((x, y))
+
+        return WorldInteractions(
+            interactions["resource"],
+            interactions["monster"],
+            interactions["workshop"],
+            interactions["bank"]["bank"],
+            interactions["grand_exchange"],
+            interactions["tasks_master"],
+            interactions["npc"]
+        ) 
+    
+    def _generate_resource_sources(self):
+        resource_sources = {}
+        for resource in self._resource_data:
+            for drop in resource["drops"]:
+                resource_sources.setdefault(drop["code"], set()).add(resource["code"])
+
+        return resource_sources 
+    
+    def _generate_monster_drop_sources(self):
+        monster_sources = {}
+        for monster in self._monster_data:
+            for drop in monster["drops"]:
+                monster_sources.setdefault(drop["code"], set()).add(monster["code"])
+
+        return monster_sources 
+
+    def get_locations_of_resource(self, resource: str) -> str:
+        resource_tile = self._resource_source[resource]
+
+        locations = []
+        for tile in resource_tile:
+            locations.extend(self._interactions.resources[tile])
+
+        return locations
+
+    def get_locations_of_monster(self, monster: str) -> str:
+        locations = self._interactions.monsters[monster]
+        return locations
+    
+    def get_workshop_for_item(self, item: str) -> str :
+        if self._item_data[item]["craft"]:
+            return self._item_data[item]["craft"]["skill"]
+        
+        return []
+    
+    def get_crafting_materials_for_item(self, item: str) -> List[Tuple[str, int]]:
+        if self._item_data[item]["craft"]:
+            materials = self._item_data[item]["craft"]["items"]
+            return [{"item": m["code"], "quantity": m["quantity"]} for m in materials]
+        
+        return []
+    
+    def get_bank_locations(self) -> List[Tuple[int, int]]:
+        return self._interactions.banks
+    
+    def get_workshop_locations(self, skill: str) -> List[Tuple[int, int]]:
+        return self._interactions.workshops[skill]
+    
+    def get_amount_of_item_in_bank(self, item: str) -> int:
+        return self._bank_data[item]
+       
+    def _bank_contains_items(self, items: List[ItemSelection]) -> bool:
+        for item in items:
+            if not self._bank_contains_item(item.item):
+                return False
+            
+        return True
+
+    def _bank_contains_item(self, item_code: str) -> bool:
+        for item in self._bank_data:
+            if item["code"] == item_code:
+                return True
+            
+        return False

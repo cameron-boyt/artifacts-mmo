@@ -7,6 +7,7 @@ from character import CharacterAgent
 from api import APIClient
 import logging
 from typing import Any, Dict
+from worldstate import WorldState
 
 class ActionScheduler:
     """Manages action queues and worker tasks for all characters."""
@@ -23,14 +24,14 @@ class ActionScheduler:
         print(self.queues)
 
 
-    def add_character(self, character_data: Dict[str, Any], bank_data: Dict[str, Any]):
+    def add_character(self, character_data: Dict[str, Any], world_state: WorldState):
         """Add a new charcter to be handled by the scheduler."""
         name = character_data["name"]
         if name in self.agents: 
             return
         
         self.logger.info(f"Adding character: {name}")
-        agent = CharacterAgent(character_data, bank_data, self.api_client, self)
+        agent = CharacterAgent(character_data, world_state, self.api_client, self)
         self.agents[name] = agent
         self.queues[name] = deque()
         task = asyncio.create_task(self._worker(name))
@@ -186,11 +187,35 @@ class ActionScheduler:
                 
                 case ActionCondition.INVENTORY_FULL:
                     condition_met = agent.is_inventory_full()
+
+                case ActionCondition.INVENTORY_HAS_AVAILABLE_SPACE:
+                    free_spaces = expression.parameters["spaces"]
+                    condition_met = agent.inventory_has_available_space(free_spaces)
+
+                case ActionCondition.INVENTORY_HAS_AVAILABLE_SPACE_FOR_ITEM_OF_QUANTITY:
+                    items = expression.parameters["items"]
+                    needed_space = 0
+                    for item in items:
+                        needed_quantity = item["quantity"]
+                        current_quantity = agent.get_quantity_of_item_in_inventory(item["item"])
+                        needed_space += needed_quantity - current_quantity
+
+                    condition_met = agent.inventory_has_available_space(needed_space)
+                
+                case ActionCondition.INVENTORY_HAS_ITEM_OF_QUANTITY:
+                    item = expression.parameters["item"]
+                    quantity = expression.parameters["quantity"]
+                    condition_met = agent.inventory_has_item_of_quantity(item, quantity)
                 
                 case ActionCondition.BANK_HAS_ITEM_OF_QUANTITY:
-                    item_code = expression.parameters.get("item_code", "")
-                    quantity = expression.parameters.get("quantity", 0)
-                    condition_met = agent.bank_has_item_of_quantity(item_code, quantity)
+                    item = expression.parameters["item"]
+                    quantity = expression.parameters["quantity"]
+                    condition_met = agent.bank_has_item_of_quantity(item, quantity)
+
+                case ActionCondition.BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY:
+                    item = expression.parameters["item"]
+                    quantity = expression.parameters["quantity"]
+                    condition_met = agent.bank_and_inventory_have_item_of_quantity(item, quantity)
 
                 case _:
                     raise NotImplementedError()
