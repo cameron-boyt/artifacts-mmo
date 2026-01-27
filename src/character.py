@@ -38,6 +38,14 @@ class CharacterAgent:
 
         return best_location
     
+    def get_number_of_items_in_inventory(self) -> int:
+        """Get the total number of items in the agent's inventory"""
+        return sum(item["quantity"] for item in self.char_data["inventory"])
+    
+    def get_inventory_size(self) -> int:
+        """Get the maximum number of items the agent's inventory can store."""
+        return self.char_data["inventory_max_items"]
+
     def get_quantity_of_item_in_inventory(self, item: str) -> int:
         """Get the quantity of an item in the agent's inventory."""
         for item_data in self.char_data["inventory"]:
@@ -57,13 +65,15 @@ class CharacterAgent:
     ## Condition Checkers
     def is_inventory_full(self) -> bool:
         """Check if the agent's inventory is full."""
-        item_count = sum(item["quantity"] for item in self.char_data["inventory"])
-        return item_count >= self.char_data["inventory_max_items"]
+        item_count = self.get_number_of_items_in_inventory()
+        inv_size = self.get_inventory_size()
+        return item_count >= inv_size
     
     def inventory_has_available_space(self, spaces: int) -> bool:
         """Check if the agent's inventory has a number of space available."""
-        item_count = sum(item["quantity"] for item in self.char_data["inventory"])
-        return self.char_data["inventory_max_items"] - item_count >= spaces
+        item_count = self.get_number_of_items_in_inventory()
+        inv_size = self.get_inventory_size()
+        return inv_size - item_count >= spaces
     
     def inventory_has_item_of_quantity(self, item: str, quantity: int) -> bool:
         """Check if the agent's inventory has an item of at least a specific quantity."""
@@ -130,14 +140,31 @@ class CharacterAgent:
             case CharacterAction.BANK_WITHDRAW_ITEM:
                 match action.params.get("preset", "none"):
                     case _:
+                        # Construct a list of items that need to be withdrawn
                         items_to_withdraw = []
                         for withdraw in action.params.get("items", []):
                             quantity_to_withdraw = int(withdraw["quantity"])
+
+                            # If we only want to withdraw the needed amount, check how much we have in the inventory
                             if action.params.get("needed_quantity_only", False):
                                 quantity_in_inv = self.get_quantity_of_item_in_inventory(withdraw["item"])
                                 quantity_to_withdraw = quantity_to_withdraw - quantity_in_inv
 
                             items_to_withdraw.append({ "code": withdraw["item"], "quantity": quantity_to_withdraw })
+
+                        if action.params.get("withdraw_until_inv_full", False):
+                            # Check how many items are in each "set", and how many of the first set we already have in the inventory
+                            total_items_needed = 0
+                            items_already_in_inv = 0
+                            for withdraw in action.params.get("items", []):
+                                total_items_needed += int(withdraw["quantity"])
+                                items_already_in_inv += self.get_quantity_of_item_in_inventory(withdraw["item"])
+
+                            # Maximise the number of item sets we can withdraw
+                            available_inv_space = self.get_number_of_items_in_inventory()
+                            sets_to_withdraw = (available_inv_space - (total_items_needed - items_already_in_inv)) // total_items_needed
+                            for item in items_to_withdraw:
+                                x["quantity"] *= sets_to_withdraw
 
                 result = await self.api_client.bank_withdraw_item(self.name, items_to_withdraw)
             

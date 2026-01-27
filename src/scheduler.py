@@ -192,7 +192,7 @@ class ActionScheduler:
                     free_spaces = expression.parameters["spaces"]
                     condition_met = agent.inventory_has_available_space(free_spaces)
 
-                case ActionCondition.INVENTORY_HAS_AVAILABLE_SPACE_FOR_ITEM_OF_QUANTITY:
+                case ActionCondition.INVENTORY_HAS_AVAILABLE_SPACE_FOR_ITEMS:
                     items = expression.parameters["items"]
                     needed_space = 0
                     for item in items:

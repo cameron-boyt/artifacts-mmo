@@ -5,14 +5,14 @@ from condition_factories import *
 from control_factories import *
 from api import APIClient
 from scheduler import ActionScheduler
-from planner import ActionPlanner, ActionIntent, Intention, ItemQuantity, ItemSelection
+from planner import ActionPlanner, ActionIntent, Intention
 from worldstate import WorldState
 import logging
 import json
 import re
 
 def get_token() -> str:
-    with open("C:/Users/Cameron/Desktop/ArtifactsMMO/artifacts-mmo/token.txt", 'r') as f:
+    with open("token.txt", 'r') as f:
         TOKEN = f.read().strip()
 
     return TOKEN
@@ -161,9 +161,11 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str):
             
         case 'move':
             if len(args) == 1 and args[0] == "prev":
-                node = planner.plan(agent, Intention.MOVE, prev_location=True)
-            else:
-                node = planner.plan(agent, Intention.MOVE)
+                node = planner.plan(agent, ActionIntent(Intention.MOVE, prev_location=True))
+            elif len(args) == 2:
+                node = planner.plan(agent, ActionIntent(Intention.MOVE), x=args[0], y=args[1])
+            else: 
+                return
 
             scheduler.queue_action_node(character_name, node)
 
@@ -176,7 +178,7 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str):
             scheduler.queue_action_node(character_name, node)
 
         case 'rest':
-            node = planner.plan(agent, Intention.REST)
+            node = planner.plan(agent, ActionIntent(Intention.REST))
             scheduler.queue_action_node(character_name, node)
 
         case 'gather':
@@ -190,20 +192,31 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str):
         case 'equip':
             if len(args) == 2:
                 node = planner.plan(agent, Intention.EQUIP, items=args[0], slot=args[1])
-                scheduler.queue_action_node(character_name, node)
+            else:
+                return
+            
+            scheduler.queue_action_node(character_name, node)
 
         case 'unequip':
             if len(args) == 1:
-                node = planner.plan(agent, Intention.UNEQUIP, slot=args[1])
-                scheduler.queue_action_node(character_name, node)
+                node = planner.plan(agent, Intention.UNEQUIP, slot=args[0])
+            else:
+                return
+            
+            scheduler.queue_action_node(character_name, node)
 
         case 'craft':
             if len(args) == 2:
-                node = planner.plan(agent, Intention.CRAFT, item=args[0], quantity=args[1])
-                scheduler.queue_action_node(character_name, node)
+                if args[1] == "max":
+                    node = planner.plan(agent, Intention.CRAFT, item=args[0], as_many_as_possible=True)
+                else:
+                    node = planner.plan(agent, Intention.CRAFT, item=args[0], quantity=args[1])
             elif len(args) == 1:
                 node = planner.plan(agent, Intention.CRAFT, item=args[0], quantity=1)
-                scheduler.queue_action_node(character_name, node)
+            else:
+                return
+            
+            scheduler.queue_action_node(character_name, node)
 
         case 'bank':
             if args[0] == 'deposit' and args[1] == 'gold':
@@ -233,28 +246,37 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str):
         # create combo actions
         case 'gather-forever':
             if len(args) == 1:
+                move_prev = False
                 gather_plan = planner.plan(agent, ActionIntent(Intention.GATHER, resource=args[0], until=cond(ActionCondition.INVENTORY_FULL)))
             else:
+                move_prev = True
                 gather_plan = planner.plan(agent, ActionIntent(Intention.GATHER, until=cond(ActionCondition.INVENTORY_FULL)))
             
             node = action_group(
-                planner.plan(agent, ActionIntent(Intention.PREPARE_FOR_GATHERING)),
-                gather_plan,
-                planner.plan(agent, ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
-                until=cond(ActionCondition.FOREVER)
+                planner.plan(agent, ActionIntent(Intention.PREPARE_FOR_GATHERING, move_prev=move_prev)),
+                action_group(
+                    gather_plan,
+                    planner.plan(agent, ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
+                    until=cond(ActionCondition.FOREVER)
+                )
             )
             scheduler.queue_action_node(character_name, node)
 
         case 'fight-forever':
             if len(args) == 1:
+                move_prev = False
                 fight_plan = planner.plan(agent, ActionIntent(Intention.FIGHT_THEN_REST, monster=args[0], until=cond(ActionCondition.INVENTORY_FULL)))
             else:
+                move_prev = True
                 fight_plan = planner.plan(agent, ActionIntent(Intention.FIGHT_THEN_REST, until=cond(ActionCondition.INVENTORY_FULL)))
 
-            node = action_group(
-                fight_plan,
-                planner.plan(agent, ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
-                until=cond(ActionCondition.FOREVER)
+            node = action_group(                
+                planner.plan(agent, ActionIntent(Intention.PREPARE_FOR_FIGHTING, move_prev=move_prev)),
+                action_group(
+                    fight_plan,
+                    planner.plan(agent, ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
+                    until=cond(ActionCondition.FOREVER)
+                )
             )
             scheduler.queue_action_node(character_name, node)
 
@@ -264,12 +286,12 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str):
 
                 if re.match(r'\d+', args[1]):
                     quantity = int(args[1])
-                    node = REPEAT(
+                    node = action_group(
                         planner.plan(agent, ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=item, quantity=quantity)),
                         until=cond(ActionCondition.FOREVER)
                     )
                 elif re.match(r'max', args[1]):
-                    node = REPEAT(
+                    node = action_group(
                         planner.plan(agent, ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=item, as_many_as_possible=True)),
                         until=cond(ActionCondition.FOREVER)
                     )
@@ -277,15 +299,6 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str):
                     raise Exception("Invalid quantity argument.")
                 
                 scheduler.queue_action_node(character_name, node)
-
-        # tests
-        case 'test':
-            node = REPEAT(
-                planner.plan(agent, ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item="copper_bar", quantity=1)),
-                until=cond(ActionCondition.FOREVER)
-            )
-
-            scheduler.queue_action_node(character_name, node)
 
 if __name__ == '__main__':
     asyncio.run(main())
