@@ -102,7 +102,7 @@ class ActionPlanner:
                 if monster := intent.params.get("monster"):
                     monster_locations = self.world_state.get_locations_of_monster(monster)
                     return action_group(
-                        move(closest_location_of=monster_locations),
+                        move(closest_of=monster_locations),
                         fight(until=intent.until)
                     )
                 else:
@@ -115,7 +115,7 @@ class ActionPlanner:
                 if resource := intent.params.get("resource"):
                     resource_locations = self.world_state.get_locations_of_resource(resource)
                     return action_group(
-                        move(closest_location_of=resource_locations),
+                        move(closest_of=resource_locations),
                         gather(until=intent.until)
                     )
                 else:
@@ -128,7 +128,7 @@ class ActionPlanner:
                 skill_workshop = self.world_state.get_workshop_for_item(item)
                 workshop_locations = self.world_state.get_workshop_locations(skill_workshop)
                 return action_group(
-                    move(closest_location_of=workshop_locations),
+                    move(closest_of=workshop_locations),
                     craft(item=item, quantity=quantity, as_many_as_possible=as_many_as_possible)
                 )
             
@@ -147,7 +147,7 @@ class ActionPlanner:
                 withdraw_until_inv_full: bool = intent.params.get("withdraw_until_inv_full", False)
                 bank_locations = self.world_state.get_bank_locations()
                 return action_group(
-                    move(closest_location_of=bank_locations),
+                    move(closest_of=bank_locations),
                     bank_withdraw_item(items=items, needed_quantity_only=needed_quantity_only, withdraw_until_inv_full=withdraw_until_inv_full)
                 )
             
@@ -156,14 +156,14 @@ class ActionPlanner:
                 items_to_deposit = self._construct_item_list(items)
                 bank_locations = self.world_state.get_bank_locations()
                 return action_group(
-                    move(closest_location_of=bank_locations),
+                    move(closest_of=bank_locations),
                     bank_deposit_item(items=items_to_deposit)
                 )
             
             case Intention.DEPOSIT_ALL:
                 bank_locations = self.world_state.get_bank_locations()
                 return action_group(
-                    move(closest_location_of=bank_locations),
+                    move(closest_of=bank_locations),
                     bank_deposit_item(preset="all")
                 )
             
@@ -171,44 +171,33 @@ class ActionPlanner:
             case Intention.PREPARE_FOR_GATHERING:
                 resource = intent.params.get("resource")
                 skill = self.world_state.get_gather_skill_for_resource(resource)
-
-                ## NEED TO TURN THIS INTO PLAN, NOT AN EXECUTED ACTION
-                tool_to_equip = self.world_state.get_best_tool_for_skill_in_bank(skill)
-
                 bank_locations = self.world_state.get_bank_locations()
-                items_to_withdraw = [ItemSelection(tool_to_equip, ItemQuantity(min=1, max=1))]
-                withdraw_action = action_group(
-                    bank_withdraw_item(items=self._construct_item_list(items_to_withdraw)),
-                    equip(item=tool_to_equip, slot="weapon")
-                ) if tool_to_equip else do_nothing()
-
                 return action_group(
-                    move(closest_location_of=bank_locations),
+                    move(closest_of=bank_locations),
                     bank_all_items(),
-                    withdraw_action
+                    action_group(
+                        bank_withdraw_item(preset=f"gathering", sub_preset=skill),
+                        equip(context="last_withdrawn")
+                    ) 
                 )
 
             case Intention.PREPARE_FOR_FIGHTING:
-                move_prev = intent.params.get("move_prev", False)
+                monster = intent.params.get("monster")
                 bank_locations = self.world_state.get_bank_locations()
-
-                if move_prev:
-                    return action_group(
-                        move(closest_location_of=bank_locations),
-                        bank_all_items(),
-                        move(prev_location=True)
-                    )
-                else:
-                    return action_group(
-                        move(closest_location_of=bank_locations),
-                        bank_all_items()
-                    )
+                return action_group(
+                    move(closest_of=bank_locations),
+                    bank_all_items(),
+                    action_group(
+                        bank_withdraw_item(preset=f"fighting"),
+                        equip(context="last_withdrawn")
+                    ) 
+                )
 
             case Intention.FIGHT_THEN_REST:
                 if monster := intent.params.get("monster"):
                     monster_locations = self.world_state.get_locations_of_monster(monster)
                     return action_group(
-                        move(closest_location_of=monster_locations),
+                        move(closest_of=monster_locations),
                         action_group(
                             fight(),
                             rest(),
@@ -232,9 +221,9 @@ class ActionPlanner:
         
                 bank_locations = self.world_state.get_bank_locations()
                 return action_group(
-                    move(closest_location_of=bank_locations),
+                    move(closest_of=bank_locations),
                     bank_action,
-                    move(prev=True)
+                    move(previous=True)
                 )
             
             case Intention.COLLECT_THEN_CRAFT:
@@ -276,7 +265,7 @@ class ActionPlanner:
 
                 # Construct fallback for when we don't have enough inventory space
                 act_bank_all_then_withdraw= action_group(
-                    move(closest_location_of=bank_locations),
+                    move(closest_of=bank_locations),
                     bank_deposit_item(preset='all'),
                     self.plan(ActionIntent(Intention.WITHDRAW, items=item_selection, needed_quantity_only=True, withdraw_until_inv_full=craft_max))
                 )

@@ -31,6 +31,12 @@ class ActionCondition(Enum):
     BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY = auto()
     FOREVER = auto()
 
+class ActionOutcome(Enum):
+    SUCCESS = auto()
+    FAIL = auto()
+    FAIL_CONTINUE = auto()
+    CANCEL = auto()
+
 class LogicalOperator(Enum):
     AND = auto()
     OR = auto()

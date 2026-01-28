@@ -40,11 +40,11 @@ def cond__item_qty_in_inv(item: str, quantity: int) -> ActionConditionExpression
 def cond__items_in_inv(items: List[Tuple[str, int]]) -> ActionConditionExpression:
     if len(items) == 1:
         item = items[0]["item"]
-        qty = items[0]["quantity"]
-        return cond__item_qty_in_inv(item, qty)
+        quantity = items[0]["quantity"]
+        return cond__item_qty_in_inv(item, quantity)
     else:
         return AND(*[
-            cond__item_qty_in_inv(item["item"], item["qty"])
+            cond__item_qty_in_inv(item["item"], item["quantity"])
             for item in items
         ])
 
@@ -65,11 +65,11 @@ def cond__item_qty_in_bank(item: str, quantity: int)-> ActionConditionExpression
 def cond__items_in_bank(items: List[Tuple[str, int]]) -> ActionConditionExpression:
     if len(items) == 1:
         item = items[0]["item"]
-        qty = items[0]["quantity"]
-        return cond__item_qty_in_bank(item, qty)
+        quantity = items[0]["quantity"]
+        return cond__item_qty_in_bank(item, quantity)
     else:
         return AND(*[
-            cond__item_qty_in_bank(item["item"], item["qty"])
+            cond__item_qty_in_bank(item["item"], item["quantity"])
             for item in items
         ])
 
@@ -84,10 +84,10 @@ def cond__item_qty_in_inv_and_bank(item: str, quantity: int) -> ActionConditionE
 def cond__items_in_inv_and_bank(items: List[Tuple[str, int]]) -> ActionConditionExpression:
     if len(items) == 1:
         item = items[0]["item"]
-        qty = items[0]["quantity"]
-        return cond__item_qty_in_inv_and_bank(item, qty)
+        quantity = items[0]["quantity"]
+        return cond__item_qty_in_inv_and_bank(item, quantity)
     else:
         return AND(*[
-            cond__item_qty_in_inv_and_bank(item["item"], item["qty"])
+            cond__item_qty_in_inv_and_bank(item["item"], item["quantity"])
             for item in items
         ])

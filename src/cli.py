@@ -23,7 +23,7 @@ async def get_bank_data(api: APIClient, query_api: bool = False) -> List[Dict[st
     all_bank_data: List[Dict[str, Any]] = bank_data.get("data")
 
     for i in range(2, bank_data.get("pages", 1)):
-        bank_data = await api.get_maps(i)
+        bank_data = await api.get_bank(i)
         all_bank_data.extend(bank_data.get("data"))
 
     with open('bank_data.json', 'w') as f:
@@ -161,7 +161,7 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: World
             
         case 'move':
             if len(args) == 1 and args[0] == "prev":
-                node = planner.plan(ActionIntent(Intention.MOVE, prev_location=True))
+                node = planner.plan(ActionIntent(Intention.MOVE, previous=True))
             elif len(args) == 2:
                 node = planner.plan(ActionIntent(Intention.MOVE, x=args[0], y=args[1]))
             else: 

@@ -2,15 +2,12 @@ import httpx
 from typing import List, Dict
 import logging
 from dataclasses import dataclass
+from action import ActionOutcome
 
 @dataclass 
 class ActionResult:
     response: dict
-    """Data response from the action request."""
-    success: bool
-    """If the action was successful."""
-    cascade: bool = False
-    """If the result of failure should cascade through the action and cancel all remaining items in the queue."""
+    outcome: ActionOutcome
 
 class APIClient:
     """Handles all HTTP communication with the remote server."""
@@ -109,49 +106,46 @@ class APIClient:
     
     async def handle_status(self, response: httpx.Response) -> ActionResult:
         data = response.json()
-        cascade = True
 
         match response.status_code:
             case 200:
                 # All good
-                success = True
+                outcome = ActionOutcome.SUCCESS
             
             case 404:
                 # Not found
-                success = False
+                outcome = ActionOutcome.FAIL
             
             case 422:
                 # Invalid payload
-                success = False
+                outcome = ActionOutcome.FAIL
             
             case 478:
                 # Missing required items
-
                 self.logger.error("Character missing required items for action.")
-                success = False
+                outcome = ActionOutcome.FAIL
 
             case 490:
                 # Character already at destination
                 self.logger.warning("Character already at destination.")
-                success = False
-                cascade = False
+                outcome = ActionOutcome.FAIL_CONTINUE
 
             case 497:
                 # Character inventory is full
                 self.logger.warning("Character inventory is full.")
-                success = False
+                outcome = ActionOutcome.FAIL
 
             case 499:
                 # Character on cooldown
                 self.logger.warning("Character is on cooldown.")
-                success = False
+                outcome = ActionOutcome.FAIL
 
             case 598:
                 # No resource/monster on map
                 self.logger.warning("No resource/monster on map.")
-                success = False
+                outcome = ActionOutcome.FAIL
 
             case _:
                 raise Exception(f"fuck; saw {response.status_code}")
             
-        return ActionResult(data, success, cascade)
+        return ActionResult(data, outcome)

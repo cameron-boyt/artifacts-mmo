@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Dict, List, Tuple, Any
-from action import Action, ActionGroup, ActionCondition, CharacterAction
-from api import APIClient, ActionResult
+from action import Action, ActionGroup, ActionCondition, ActionOutcome, ActionResult, CharacterAction
+from api import APIClient
 import logging
 from worldstate import WorldState
 
@@ -17,12 +17,13 @@ class CharacterAgent:
 
         self.name = character_data["name"]
         self.char_data: Dict[str, Any] = character_data
+        self.context = {
+            "previous_location": (self.char_data["x"],  self.char_data["y"])
+        }
         self.world_state = world_state
 
         self.is_autonomous: bool = False
         self.cooldown_expires_at: float = 0.0
-
-        self.prev_location = (0, 0)
 
     ## Helper Functions
     def get_closest_location(self, locations: List[Tuple[int, int]]) -> Tuple[int, int]:
@@ -101,7 +102,7 @@ class CharacterAgent:
     
 
     ## Action Performance
-    async def perform(self, action: Action) -> ActionResult:
+    async def perform(self, action: Action) -> ActionOutcome:
         log_msg = f"[{self.name}] Performing action: {action.type.value}"
         if action.params:
             log_msg += f" with params {action.params}"
@@ -110,16 +111,15 @@ class CharacterAgent:
         match action.type:
             ## MOVING ##
             case CharacterAction.MOVE:
-                if action.params.get("prev_location", False):
-                    x = self.prev_location[0]
-                    y = self.prev_location[1]
-                elif locations := action.params.get("closest_location_of", []):
+                if action.params.get("previous", False):
+                    x, y = self.context.get("previous_location")
+                elif locations := action.params.get("closest_of", []):
                     x, y = self.get_closest_location(locations)
                 else:
                     x = action.params["x"]
                     y = action.params["y"]
 
-                self.prev_location = (self.char_data["x"],  self.char_data["y"])
+                self.context["previous_location"] = (self.char_data["x"],  self.char_data["y"])
                 result = await self.api_client.move(self.name, x, y)
 
             ## FIGHTING ##
@@ -146,7 +146,26 @@ class CharacterAgent:
                 result = await self.api_client.bank_deposit_item(self.name, items_to_deposit)
                 
             case CharacterAction.BANK_WITHDRAW_ITEM:
+                items_to_withdraw = []
+
                 match action.params.get("preset", "none"):
+                    case "gathering":
+                        if skill := action.params.get("sub_preset"):
+                            if best_tool := self.world_state.get_best_tool_for_skill_in_bank(skill):
+                                items_to_withdraw = [{ "code": best_tool, "quantity": 1 }]
+                                self.context["last_withdrawn"] = items_to_withdraw
+                        
+                        if not items_to_withdraw:
+                            return ActionOutcome.CANCEL
+                            
+                    case "fighting":
+                        monster = action.params.get("sub_preset", "generic")
+                        if best_weapon := self.world_state.get_best_weapon_for_monster_in_bank(monster):
+                            items_to_withdraw = [{ "code": best_weapon, "quantity": 1 }]
+                            self.context["last_withdrawn"] = items_to_withdraw
+                        
+                        if not items_to_withdraw:
+                            return ActionOutcome.CANCEL
                     case _:
                         # Construct a list of items that need to be withdrawn
                         items_to_withdraw = []
@@ -183,7 +202,7 @@ class CharacterAgent:
                                     break
                             
                             if n == 0:
-                                return ActionResult(self.char_data, False, True)
+                                return ActionOutcome.CANCEL
                             
                             for item in items_to_withdraw:
                                 item["quantity"] *= n
@@ -194,7 +213,14 @@ class CharacterAgent:
                                 quantity_in_inv = self.get_quantity_of_item_in_inventory(item["code"])
                                 item["quantity"] -= quantity_in_inv
 
+
+                # Reserve the chosen items
+                reservation_id = self.world_state.reserve_bank_items(items_to_withdraw)
+                
                 result = await self.api_client.bank_withdraw_item(self.name, items_to_withdraw)
+
+                # Clear the item reservation now we've attempted the transaction
+                self.world_state.clear_bank_reservation(reservation_id)
             
             case CharacterAction.BANK_DEPOSIT_GOLD:
                 quantity_to_deposit = action.params.get("quantity", 0)
@@ -206,8 +232,16 @@ class CharacterAgent:
 
             ## EQUIPMENT ##
             case CharacterAction.EQUIP:
-                item_code = action.params.get("item")
-                item_slot = action.params.get("slot")
+                match action.params.get("context", "none"):
+                    case "last_withdrawn":
+                        last_withdraw = self.context["last_withdrawn"][0]
+                        item_code = last_withdraw["code"]
+                        item_slot = self.world_state.get_equip_slot_for_item(item_code)
+
+                    case _:
+                        item_code = action.params.get("item")
+                        item_slot = action.params.get("slot")
+
                 result = await self.api_client.equip(self.name, item_code, item_slot)
 
             case CharacterAction.UNEQUIP:
@@ -237,7 +271,7 @@ class CharacterAgent:
                 raise Exception(f"[{self.name}] Unknown action type: {action.type}")
             
         
-        if result.success:
+        if result.data:
             self.char_data = result.response.get("data").get("character")
             
             # Update bank
@@ -246,5 +280,5 @@ class CharacterAgent:
                     self.world_state._bank_data[item["code"]] = item["quantity"]
         
 
-        return result
+        return result.outcome
 

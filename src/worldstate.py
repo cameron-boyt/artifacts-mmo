@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Set, Tuple
 import logging
 from helpers import *
+import uuid
 
 type LocationSet = Set[Tuple[int, int]]
 
@@ -29,6 +30,8 @@ class WorldState:
         self._interactions: WorldInteractions = None
         self._resource_sources = {}
         self._drop_sources = {}
+
+        self.bank_reservations = {}
 
         self.__post_init__()
 
@@ -100,6 +103,9 @@ class WorldState:
     def get_workshop_for_item(self, item: str) -> str :
         return self._item_data[item]["craft"]["skill"]
     
+    def get_equip_slot_for_item(self, item: str) -> str:
+        return self._item_data[item]["slot"]
+    
     def get_gather_skill_for_resource(self, item: str) -> str:
         return self._item_data[item]["subtype"]
     
@@ -115,9 +121,29 @@ class WorldState:
     
     def get_amount_of_item_in_bank(self, item: str) -> int:
         if self._bank_contains_item(item):
-            return self._bank_data[item]
+            amount_in_bank = self._bank_data[item]
+            amount_reserved = self.get_amount_of_item_reserved_in_bank(item)
+            return amount_in_bank - amount_reserved
         else:
             return 0
+        
+    def get_amount_of_item_reserved_in_bank(self, item: str) -> int:
+        amount_reserved = 0
+        
+        for id, reserved_items in self.bank_reservations.items():
+            for reserved_item in reserved_items:
+                if reserved_item["code"] == item:
+                    amount_reserved += reserved_item["quantity"]
+
+        return amount_reserved
+        
+    def reserve_bank_items(self, items: List[Dict]) -> str:
+        id = str(uuid.uuid4())
+        self.bank_reservations[id] = items
+        return id
+
+    def clear_bank_reservation(self, id: str):
+        del self.bank_reservations[id]        
        
     def _bank_contains_items(self, items: List[ItemSelection]) -> bool:
         for item in items:
@@ -145,3 +171,7 @@ class WorldState:
             return best_tool
         else:
             return None
+        
+    def get_best_weapon_for_monster_in_bank(self, monster: str) -> str | None:
+        monster_data = self._monster_data[monster]
+        raise NotImplementedError()

@@ -2,7 +2,7 @@ import asyncio
 import datetime
 import time
 from collections import deque
-from action import Action, ActionGroup, ActionCondition, ActionConditionExpression, LogicalOperator, ControlOperator, ActionControlNode
+from action import Action, ActionGroup, ActionCondition, ActionConditionExpression, ActionOutcome, LogicalOperator, ControlOperator, ActionControlNode
 from character import CharacterAgent
 from api import APIClient
 import logging
@@ -16,7 +16,7 @@ class ActionScheduler:
 
         self.api_client = api_client
         self.agents: dict[str, CharacterAgent] = {}
-        self.queues: dict[str, deque[Action | ActionGroup]] = {}
+        self.queues: dict[str, deque[Action | ActionGroup | ActionControlNode]] = {}
         self.worker_tasks: dict[str, asyncio.Task] = {}
 
 
@@ -104,26 +104,29 @@ class ActionScheduler:
             # Execute the action
             result = await agent.perform(action)
 
-            # Action failed if cooldown is negative
-            if not result.success:
-                self.logger.warning(f"[{agent.name}] Action {action.type} failed.")
+            # Check action result
+            match result.result:
+                case ActionOutcome.SUCCESS:
+                    # Update the agent's cooldown
+                    new_cooldown = result.response.get("data").get("cooldown").get("remaining_seconds")
+                    agent.cooldown_expires_at = time.time() + new_cooldown
 
-                if result.cascade:
+                    # Check if the repeat until condition has been met for this action
+                    if self._evaluate_condition(agent, action.until):
+                        return True
+                
+                case ActionOutcome.FAIL:
+                    self.logger.warning(f"[{agent.name}] ")
                     return False
-                else:
-                    # No need to update cooldown since the action failed, we can safely continue the action sequence
-                    self.logger.warning(f"[{agent.name}] Continuing action chain anyway...")
+
+                case ActionOutcome.FAIL_CONTINUE:
+                    # The action failed, but we can safely continue the action sequence
+                    self.logger.warning(f"[{agent.name}] Action {action.type} failed, but continuing action sequence anyway...")
                     return True
-
-            # Update the agent's cooldown
-            new_cooldown = result.response.get("data").get("cooldown").get("remaining_seconds")
-            agent.cooldown_expires_at = time.time() + new_cooldown
-
-            # Check if the repeat until condition has been met for this action
-            if self._evaluate_condition(agent, action.until):
-                break
-
-        return True
+                
+                case ActionOutcome.CANCEL:
+                    # A cancelled action can be treated as a success with no state updates
+                    return True
 
     async def _process_action_group(self, agent: CharacterAgent, action_group: ActionGroup) -> bool:
         """Process an action group, sequencing through all child actions, repeating as defined."""
@@ -147,7 +150,11 @@ class ActionScheduler:
         match control_node.control_operator:
             case ControlOperator.IF:
                 branch = self._evaluate_control_branches(agent, control_node)
-                return await self._process_node(agent, branch)
+                if branch:
+                    return await self._process_node(agent, branch)
+                else:
+                    # No fail_path branch, therefore continue following the action sequence
+                    return True
             
             case ControlOperator.REPEAT:
                 while True:
