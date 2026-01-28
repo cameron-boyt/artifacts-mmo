@@ -187,6 +187,9 @@ class ActionScheduler:
                 
                 case ActionCondition.INVENTORY_FULL:
                     condition_met = agent.is_inventory_full()
+                
+                case ActionCondition.INVENTORY_EMPTY:
+                    condition_met = agent.is_inventory_empty()
 
                 case ActionCondition.INVENTORY_HAS_AVAILABLE_SPACE:
                     free_spaces = expression.parameters["spaces"]
@@ -221,11 +224,11 @@ class ActionScheduler:
                     raise NotImplementedError()
                 
             if condition_met:
-                self.logger.debug(f"[{agent.name}] Successfully met condition.")
+                self.logger.debug(f"[{agent.name}] Passed {expression.condition} with parameters {expression.parameters}.")
             else:
                 # Exception case where a 'failure' is due to a FOREVER condition
                 if expression.condition != ActionCondition.FOREVER:
-                    self.logger.debug(f"[{agent.name}] Failed to meet condition.")
+                    self.logger.debug(f"[{agent.name}] Failed {expression.condition} with parameters {expression.parameters}.")
 
             return condition_met
         else:

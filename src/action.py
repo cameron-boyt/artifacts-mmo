@@ -23,8 +23,9 @@ class CharacterAction(Enum):
 class ActionCondition(Enum):
     NONE = auto()
     INVENTORY_FULL = auto()
+    INVENTORY_EMPTY = auto()
     INVENTORY_HAS_AVAILABLE_SPACE = auto()
-    INVENTORY_HAS_AVAILABLE_SPACE_FOR_ITEM_OF_QUANTITY = auto()
+    INVENTORY_HAS_AVAILABLE_SPACE_FOR_ITEMS = auto()
     BANK_HAS_ITEM_OF_QUANTITY = auto()
     INVENTORY_HAS_ITEM_OF_QUANTITY = auto()
     BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY = auto()
@@ -79,7 +80,7 @@ class ActionConditionExpression:
     def is_leaf(self) -> bool:
         return self.condition is not None
 
-@dataclass(frozen=True)
+@dataclass
 class ActionControlNode:
     control_operator: ControlOperator
     branches: List[Tuple[ActionConditionExpression, ActionGroup]] | None = None

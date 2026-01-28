@@ -34,7 +34,7 @@ class WorldState:
 
     def __post_init__(self):
         self._interactions = self._generate_interations()
-        self._resource_source = self._generate_resource_sources()
+        self._resource_sources = self._generate_resource_sources()
         self._drop_sources = self._generate_monster_drop_sources()
 
     def _generate_interations(self):
@@ -74,9 +74,18 @@ class WorldState:
                 monster_sources.setdefault(drop["code"], set()).add(monster["code"])
 
         return monster_sources 
+    
+    def is_an_item(self, item: str) -> bool:
+        return item in self._item_data
+    
+    def is_a_resource(self, resource: str) -> bool:
+        return resource in self._resource_sources
+    
+    def is_a_monster(self, monster: str) -> bool:
+        return monster in self._interactions.monsters
 
-    def get_locations_of_resource(self, resource: str) -> str:
-        resource_tile = self._resource_source[resource]
+    def get_locations_of_resource(self, resource: str) -> List[Tuple[int, int]]:
+        resource_tile = self._resource_sources[resource]
 
         locations = []
         for tile in resource_tile:
@@ -84,22 +93,19 @@ class WorldState:
 
         return locations
 
-    def get_locations_of_monster(self, monster: str) -> str:
+    def get_locations_of_monster(self, monster: str) -> List[Tuple[int, int]]:
         locations = self._interactions.monsters[monster]
         return locations
     
     def get_workshop_for_item(self, item: str) -> str :
-        if self._item_data[item]["craft"]:
-            return self._item_data[item]["craft"]["skill"]
-        
-        return []
+        return self._item_data[item]["craft"]["skill"]
     
-    def get_crafting_materials_for_item(self, item: str) -> List[Tuple[str, int]]:
-        if self._item_data[item]["craft"]:
-            materials = self._item_data[item]["craft"]["items"]
-            return [{"item": m["code"], "quantity": m["quantity"]} for m in materials]
-        
-        return []
+    def get_gather_skill_for_resource(self, item: str) -> str:
+        return self._item_data[item]["subtype"]
+    
+    def get_crafting_materials_for_item(self, item: str, qty=1) -> List[Tuple[str, int]]:
+        materials = self._item_data[item]["craft"]["items"]
+        return [{"item": m["code"], "quantity": m["quantity"] * qty} for m in materials]
     
     def get_bank_locations(self) -> List[Tuple[int, int]]:
         return self._interactions.banks
@@ -108,7 +114,10 @@ class WorldState:
         return self._interactions.workshops[skill]
     
     def get_amount_of_item_in_bank(self, item: str) -> int:
-        return self._bank_data[item]
+        if self._bank_contains_item(item):
+            return self._bank_data[item]
+        else:
+            return 0
        
     def _bank_contains_items(self, items: List[ItemSelection]) -> bool:
         for item in items:
@@ -117,9 +126,22 @@ class WorldState:
             
         return True
 
-    def _bank_contains_item(self, item_code: str) -> bool:
-        for item in self._bank_data:
-            if item["code"] == item_code:
-                return True
-            
-        return False
+    def _bank_contains_item(self, item: str) -> bool:
+        return item in self._bank_data
+    
+    def get_best_tool_for_skill_in_bank(self, skill: str) -> str | None:
+        tools = [
+            item for item in self._bank_data 
+            if self._item_data[item]["subtype"] == "tool"
+            and any(effect["code"] == skill for effect in self._item_data[item]["effects"])
+        ]
+
+        if len(tools) > 0:
+            best_tool = sorted([
+                (tool, [effect["value"] for effect in self._item_data[tool]["effects"] if effect["code"] == skill][0])
+                for tool in tools
+            ])[0][0]
+
+            return best_tool
+        else:
+            return None

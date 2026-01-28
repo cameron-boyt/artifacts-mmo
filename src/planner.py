@@ -26,10 +26,13 @@ class Intention(Enum):
 
     WITHDRAW = auto()
     DEPOSIT = auto()
+    DEPOSIT_ALL = auto()
 
     # Complex Intentions
     PREPARE_FOR_GATHERING =  auto()
     PREPARE_FOR_FIGHTING = auto()
+
+    COLLECT_THEN_CRAFT = auto()
 
     FIGHT_THEN_REST = auto()
     BANK_THEN_RETURN = auto()
@@ -86,11 +89,11 @@ class ActionPlanner:
 
         return quantity
 
-    def plan(self, agent: CharacterAgent, intent: ActionIntent) -> Action | ActionGroup | ActionControlNode:
+    def plan(self, intent: ActionIntent) -> Action | ActionGroup | ActionControlNode:
         match intent.intention:
             # Basic Intentions
             case Intention.MOVE:
-                return move(params=intent.params)
+                return move(**intent.params)
             
             case Intention.TRANSITION:
                 raise NotImplementedError()
@@ -119,13 +122,14 @@ class ActionPlanner:
                     return gather(until=intent.until)
             
             case Intention.CRAFT:
-                item = intent.params.get("item")
-                quantity = intent.params.get("quantity")
+                item: str = intent.params.get("item")
+                quantity: int = intent.params.get("quantity")
+                as_many_as_possible: bool = intent.params.get("as_many_as_possible")
                 skill_workshop = self.world_state.get_workshop_for_item(item)
                 workshop_locations = self.world_state.get_workshop_locations(skill_workshop)
                 return action_group(
-                    move(closet_location_of=workshop_locations),
-                    craft(item_code=item, quantity=quantity)
+                    move(closest_location_of=workshop_locations),
+                    craft(item=item, quantity=quantity, as_many_as_possible=as_many_as_possible)
                 )
             
             case Intention.EQUIP:
@@ -139,11 +143,12 @@ class ActionPlanner:
             
             case Intention.WITHDRAW:
                 items: List[ItemSelection] = intent.params.get("items")
-                items_to_withdraw = self._construct_item_list(items)
+                needed_quantity_only: bool = intent.params.get("needed_quantity_only", False)
+                withdraw_until_inv_full: bool = intent.params.get("withdraw_until_inv_full", False)
                 bank_locations = self.world_state.get_bank_locations()
                 return action_group(
                     move(closest_location_of=bank_locations),
-                    bank_withdraw_item(items=items_to_withdraw)
+                    bank_withdraw_item(items=items, needed_quantity_only=needed_quantity_only, withdraw_until_inv_full=withdraw_until_inv_full)
                 )
             
             case Intention.DEPOSIT:
@@ -155,22 +160,33 @@ class ActionPlanner:
                     bank_deposit_item(items=items_to_deposit)
                 )
             
+            case Intention.DEPOSIT_ALL:
+                bank_locations = self.world_state.get_bank_locations()
+                return action_group(
+                    move(closest_location_of=bank_locations),
+                    bank_deposit_item(preset="all")
+                )
+            
             # Complex Intentions
             case Intention.PREPARE_FOR_GATHERING:
-                move_prev = intent.params.get("move_prev", False)
-                bank_locations = self.world_state.get_bank_locations()
+                resource = intent.params.get("resource")
+                skill = self.world_state.get_gather_skill_for_resource(resource)
 
-                if move_prev:
-                    return action_group(
-                        move(closest_location_of=bank_locations),
-                        bank_all_items(),
-                        move(prev_location=True)
-                    )
-                else:
-                    return action_group(
-                        move(closest_location_of=bank_locations),
-                        bank_all_items()
-                    )
+                ## NEED TO TURN THIS INTO PLAN, NOT AN EXECUTED ACTION
+                tool_to_equip = self.world_state.get_best_tool_for_skill_in_bank(skill)
+
+                bank_locations = self.world_state.get_bank_locations()
+                items_to_withdraw = [ItemSelection(tool_to_equip, ItemQuantity(min=1, max=1))]
+                withdraw_action = action_group(
+                    bank_withdraw_item(items=self._construct_item_list(items_to_withdraw)),
+                    equip(item=tool_to_equip, slot="weapon")
+                ) if tool_to_equip else do_nothing()
+
+                return action_group(
+                    move(closest_location_of=bank_locations),
+                    bank_all_items(),
+                    withdraw_action
+                )
 
             case Intention.PREPARE_FOR_FIGHTING:
                 move_prev = intent.params.get("move_prev", False)
@@ -220,38 +236,23 @@ class ActionPlanner:
                     bank_action,
                     move(prev=True)
                 )
-
-            case Intention.CRAFT_OR_GATHER_INTERMEDIARIES:
-                """
-                If we have enough items in the inv, 
-                    Go to the crafting station
-                    Craft
-                Elseif we have enough including bank items,
-                    Go to the bank
-                    If don't have enough space,
-                        Deposit some items we don't need
-                    Withdraw the items from the bank
-                    Go to the crafting station
-                    Craft
-                Else (we don't have enough items at all),
-                    For each item,
-                        Go to the gathering location
-                        Gather
-                        Go to the bank
-                        Bank all items
-                    END for
-                END
-
-                """
+            
+            case Intention.COLLECT_THEN_CRAFT:
                 craft_item = intent.params.get("item")
                 craft_max = intent.params.get("as_many_as_possible", False)
                 craft_qty = 1 if craft_max else intent.params.get("quantity", 0)
 
-                required_materials = self.world_state.get_crafting_materials_for_item(craft_item)
-                item_selection = [
-                    ItemSelection(m["item"], ItemQuantity(min=m["quantity"], max=m["quantity"])) 
-                    for m in required_materials
-                ]
+                required_materials = self.world_state.get_crafting_materials_for_item(craft_item, craft_qty)
+                if craft_max:
+                    item_selection = [
+                        ItemSelection(m["item"], ItemQuantity(min=m["quantity"], multiple_of=m["quantity"]))
+                        for m in required_materials
+                    ]
+                else:
+                    item_selection = [
+                        ItemSelection(m["item"], ItemQuantity(min=m["quantity"] * craft_qty, multiple_of=m["quantity"] * craft_qty))
+                        for m in required_materials
+                    ]
                 
                 # Constuct list of items to withdraw from the bank
                 items_to_withdraw = self._construct_item_list(item_selection)
@@ -260,58 +261,15 @@ class ActionPlanner:
                 bank_locations = self.world_state.get_bank_locations()
 
                 # Get the location of the crafting stations
-                skill_workshop = self.world_state.get_workshop_for_item(item)
+                skill_workshop = self.world_state.get_workshop_for_item(craft_item)
                 workshop_locations = self.world_state.get_workshop_locations(skill_workshop)
-
-                # Get the locations of items to gather incase of fallback
-                fallback_actions = []
-                for material in required_materials:
-                    gather_item = material["item"]
-                    gather_qty = material["quantity"]
-
-                    # Get the location of the closest source of this item
-                    resource_locations = self.world_state.get_locations_of_resource(gather_item)
-
-                    bank_or_inv_has_quantity_cond = cond__item_qty_in_bank_and_inv(gather_item, gather_qty)
-                    fallback_actions.extend([
-                        action_group(
-                            move(closest_location_of=resource_locations),
-                            gather(until=OR(
-                                cond(ActionCondition.INVENTORY_FULL),
-                                bank_or_inv_has_quantity_cond
-                            )),
-                            move(closest_location_of=bank_locations),
-                            bank_all_items(),
-                            until=bank_or_inv_has_quantity_cond 
-                        )
-                    ])
-
-                act_gather_materials = action_group(
-                    *fallback_actions
-                )
 
                 ## Construct main body conditions
                 # First, check if we have the items available in our inventory alone
-                if len(required_materials) == 1:
-                    item = required_materials[0]["item"]
-                    qty = required_materials[0]["quantity"]
-                    cond_materials_in_inv = cond__item_qty_in_inv(item, qty * craft_qty)
-                else:
-                    cond_materials_in_inv = AND(*[
-                        cond__item_qty_in_inv(m["item"], m["qty"] * craft_qty)
-                        for m in required_materials
-                    ])
+                cond_materials_in_inv = cond__items_in_inv(required_materials)
 
                 # Second, check if combined in the inventory and bank we have the items
-                if len(required_materials) == 1:
-                    item = required_materials[0]["item"]
-                    qty = required_materials[0]["quantity"]
-                    cond_materials_in_inv_and_bank = cond__item_qty_in_bank_and_inv(item, qty * craft_qty)
-                else:
-                    cond_materials_in_inv_and_bank = AND(*[
-                        cond__item_qty_in_bank_and_inv(m["item"], m["qty"] * craft_qty)
-                        for m in required_materials
-                    ])
+                cond_materials_in_inv_and_bank = cond__items_in_inv_and_bank(required_materials)
 
                 # Third, check if we actually have enough space in the inventory to withdraw
                 cond_has_space_for_items = cond__inv_has_space_for_items(required_materials)
@@ -320,20 +278,14 @@ class ActionPlanner:
                 act_bank_all_then_withdraw= action_group(
                     move(closest_location_of=bank_locations),
                     bank_deposit_item(preset='all'),
-                    bank_withdraw_item(items=items_to_withdraw, withdraw_until_inv_full=craft_max, needed_quantity_only=True)
+                    self.plan(ActionIntent(Intention.WITHDRAW, items=item_selection, needed_quantity_only=True, withdraw_until_inv_full=craft_max))
                 )
 
                 # Construct bank and withdraw action plan
-                act_move_to_bank_and_withdraw = action_group(
-                    move(closest_location_of=bank_locations),
-                    bank_withdraw_item(items=items_to_withdraw, withdraw_until_inv_full=craft_max, needed_quantity_only=True)
-                )
+                act_move_to_bank_and_withdraw = self.plan(ActionIntent(Intention.WITHDRAW, items=item_selection, needed_quantity_only=True, withdraw_until_inv_full=craft_max))
 
                 # Construct move to workshop and craft action plan
-                act_move_to_workshop_and_craft = action_group(
-                    move(closest_location_of=workshop_locations),
-                    craft(item=item, as_many_as_possible=craft_max, quantity=quantity)
-                )
+                act_move_to_workshop_and_craft = self.plan(ActionIntent(Intention.CRAFT, item=craft_item, quantity=craft_qty, as_many_as_possible=craft_max))
                 
                 return IF(
                     (cond_materials_in_inv, act_move_to_workshop_and_craft),
@@ -349,8 +301,31 @@ class ActionPlanner:
                             )
                         )
                     )),
-                    fail_path=act_gather_materials
+                    fail_path=do_nothing()
                 )
+
+            case Intention.CRAFT_OR_GATHER_INTERMEDIARIES:
+                craft_item = intent.params.get("item")
+                craft_max = intent.params.get("as_many_as_possible", False)
+                craft_qty = 1 if craft_max else intent.params.get("quantity", 0)
+
+                # Construct the list of gather fallback actions
+                required_materials = self.world_state.get_crafting_materials_for_item(craft_item, craft_qty)
+                act_gather_materials = action_group(*[
+                    action_group(
+                        self.plan(ActionIntent(Intention.PREPARE_FOR_GATHERING, resource=material["item"])),
+                        self.plan(ActionIntent(Intention.GATHER, resource=material["item"], until=OR(cond(ActionCondition.INVENTORY_FULL), cond__item_qty_in_inv_and_bank(material["item"], material["quantity"])))),
+                        self.plan(ActionIntent(Intention.DEPOSIT_ALL)),
+                        until=cond__item_qty_in_inv_and_bank(material["item"], material["quantity"])
+                    )
+                    for material in required_materials
+                ])
+                
+                # Generate a COLLECT_THEN_CRAFT, but override the failpath with the gathering
+                act_collect_then_craft = self.plan(ActionIntent(Intention.COLLECT_THEN_CRAFT, item=craft_item, quantity=craft_qty, as_many_as_possible=craft_max))
+                act_collect_then_craft.fail_path = act_gather_materials
+                
+                return act_collect_then_craft
                 
             case _:
                 raise Exception("Unknown action type.")

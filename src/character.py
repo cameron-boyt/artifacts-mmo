@@ -45,6 +45,9 @@ class CharacterAgent:
     def get_inventory_size(self) -> int:
         """Get the maximum number of items the agent's inventory can store."""
         return self.char_data["inventory_max_items"]
+    
+    def get_free_inventory_spaces(self) -> int:
+        return self.get_inventory_size() - self.get_number_of_items_in_inventory()
 
     def get_quantity_of_item_in_inventory(self, item: str) -> int:
         """Get the quantity of an item in the agent's inventory."""
@@ -68,6 +71,11 @@ class CharacterAgent:
         item_count = self.get_number_of_items_in_inventory()
         inv_size = self.get_inventory_size()
         return item_count >= inv_size
+    
+    def is_inventory_empty(self) -> bool:
+        """Check if the agent's inventory is empty."""
+        item_count = self.get_number_of_items_in_inventory()
+        return item_count == 0
     
     def inventory_has_available_space(self, spaces: int) -> bool:
         """Check if the agent's inventory has a number of space available."""
@@ -142,29 +150,49 @@ class CharacterAgent:
                     case _:
                         # Construct a list of items that need to be withdrawn
                         items_to_withdraw = []
+
+                        # Also, heck how many items are needed to be withdrawn
+                        total_items_needed = 0
+                        items_already_in_inv = 0
+
                         for withdraw in action.params.get("items", []):
                             quantity_to_withdraw = int(withdraw["quantity"])
-
-                            # If we only want to withdraw the needed amount, check how much we have in the inventory
-                            if action.params.get("needed_quantity_only", False):
-                                quantity_in_inv = self.get_quantity_of_item_in_inventory(withdraw["item"])
-                                quantity_to_withdraw = quantity_to_withdraw - quantity_in_inv
-
                             items_to_withdraw.append({ "code": withdraw["item"], "quantity": quantity_to_withdraw })
 
-                        if action.params.get("withdraw_until_inv_full", False):
-                            # Check how many items are in each "set", and how many of the first set we already have in the inventory
-                            total_items_needed = 0
-                            items_already_in_inv = 0
-                            for withdraw in action.params.get("items", []):
-                                total_items_needed += int(withdraw["quantity"])
-                                items_already_in_inv += self.get_quantity_of_item_in_inventory(withdraw["item"])
+                            total_items_needed += int(withdraw["quantity"])
+                            items_already_in_inv += self.get_quantity_of_item_in_inventory(withdraw["item"])
 
+                        if total_items_needed == 0:
+                            print("?")
+
+                        if action.params.get("withdraw_until_inv_full", False):
                             # Maximise the number of item sets we can withdraw
-                            available_inv_space = self.get_number_of_items_in_inventory()
-                            sets_to_withdraw = (available_inv_space - (total_items_needed - items_already_in_inv)) // total_items_needed
+                            available_inv_space = self.get_free_inventory_spaces()
+                            sets_to_withdraw = (available_inv_space - items_already_in_inv) // total_items_needed
+
+                            # Check we can actually withdraw this number of sets
+                            all_good = False
+                            for n in range(sets_to_withdraw, 0, -1):
+                                for item in items_to_withdraw:
+                                    if self.world_state.get_amount_of_item_in_bank(item["code"]) < item["quantity"] * n:
+                                        break
+
+                                    all_good = True
+
+                                if all_good:
+                                    break
+                            
+                            if n == 0:
+                                return ActionResult(self.char_data, False, True)
+                            
                             for item in items_to_withdraw:
-                                x["quantity"] *= sets_to_withdraw
+                                item["quantity"] *= n
+
+                        # If we only want to withdraw the needed amount, check how much we have in the inventory
+                        if action.params.get("needed_quantity_only", False):
+                            for item in items_to_withdraw:
+                                quantity_in_inv = self.get_quantity_of_item_in_inventory(item["code"])
+                                item["quantity"] -= quantity_in_inv
 
                 result = await self.api_client.bank_withdraw_item(self.name, items_to_withdraw)
             
@@ -188,9 +216,22 @@ class CharacterAgent:
 
             ## CRAFTING ##
             case CharacterAction.CRAFT:
-                item_code = action.params.get("item")
+                item = action.params.get("item")
                 quantity = action.params.get("quantity", 1)
-                result = await self.api_client.craft(self.name, item_code, quantity)
+                as_many_as_possible = action.params.get("as_many_as_possible", False)
+
+                if as_many_as_possible:
+                    # Maximise the number of items we craft
+                    lowest_multiple = 999
+                    required_materials = self.world_state.get_crafting_materials_for_item(item)
+                    for inv_item in self.char_data["inventory"]:
+                        for req_item in required_materials:
+                            if inv_item["code"] == req_item["item"]:
+                                lowest_multiple = min(lowest_multiple, inv_item["quantity"] // req_item["quantity"])
+
+                    quantity = lowest_multiple
+                        
+                result = await self.api_client.craft(self.name, item, quantity)
         
             case _:
                 raise Exception(f"[{self.name}] Unknown action type: {action.type}")
@@ -198,6 +239,12 @@ class CharacterAgent:
         
         if result.success:
             self.char_data = result.response.get("data").get("character")
+            
+            # Update bank
+            if bank_data := result.response.get("data").get("bank"):
+                for item in bank_data:
+                    self.world_state._bank_data[item["code"]] = item["quantity"]
+        
 
         return result
 

@@ -116,36 +116,42 @@ class APIClient:
                 # All good
                 success = True
             
+            case 404:
+                # Not found
+                success = False
+            
             case 422:
                 # Invalid payload
                 success = False
             
-            case 404:
-                # Not found
+            case 478:
+                # Missing required items
+
+                self.logger.error("Character missing required items for action.")
                 success = False
 
             case 490:
                 # Character already at destination
-                self.logger.warning("Character already at destination")
+                self.logger.warning("Character already at destination.")
                 success = False
                 cascade = False
 
             case 497:
                 # Character inventory is full
-                self.logger.warning("Character inventory is full")
+                self.logger.warning("Character inventory is full.")
                 success = False
 
             case 499:
                 # Character on cooldown
-                self.logger.warning("Character is on cooldown")
+                self.logger.warning("Character is on cooldown.")
                 success = False
 
             case 598:
                 # No resource/monster on map
-                self.logger.warning("No resource/monster on map")
+                self.logger.warning("No resource/monster on map.")
                 success = False
 
             case _:
-                raise Exception("fuck")
+                raise Exception(f"fuck; saw {response.status_code}")
             
         return ActionResult(data, success, cascade)
