@@ -1,6 +1,4 @@
-from action import Action, ActionGroup, ActionCondition, CharacterAction, ActionConditionExpression
-from control_factories import *
-from condition_factories import *
+from action import Action, ActionGroup, CharacterAction, ActionConditionExpression
 
 ## Grouping Factory
 def action_group(*actions: Action | ActionGroup, until: ActionConditionExpression | None = None) -> ActionGroup:
@@ -49,12 +47,9 @@ def bank_deposit_item(**params) -> Action:
 def bank_withdraw_item(**params) -> Action:
     return Action(CharacterAction.BANK_WITHDRAW_ITEM, params=params)
 
-def bank_all_items() -> ActionControlNode:
-    return IF(
-        (NOT(cond(ActionCondition.INVENTORY_EMPTY)), Action(CharacterAction.BANK_DEPOSIT_ITEM, params={"preset": "all"})),
-        fail_path=do_nothing()
-    )
-
+def bank_all_items() -> Action:
+    return Action(CharacterAction.BANK_DEPOSIT_ITEM, params={"preset": "all"})
+                                                             
 def bank_deposit_gold(**params) -> Action:
     return Action(CharacterAction.BANK_DEPOSIT_GOLD, params=params)
 

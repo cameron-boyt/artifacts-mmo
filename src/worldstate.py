@@ -95,10 +95,25 @@ class WorldState:
             locations.extend(self._interactions.resources[tile])
 
         return locations
+    
+    def get_resource_at_location(self, x: int, y: int) -> str | None:
+        for resource, locations in self._interactions.resources.items():
+            if (x, y) in locations:
+                return resource
+            
+    def get_data_for_resource(self, resource: str) -> Dict | None:
+        for data in self._resource_data:
+            if data["code"] == resource:
+                return data
 
     def get_locations_of_monster(self, monster: str) -> List[Tuple[int, int]]:
         locations = self._interactions.monsters[monster]
         return locations
+    
+    def get_monster_at_location(self, x: int, y: int) -> str | None:
+        for monster, locations in self._interactions.monster.items():
+            if (x, y) in locations:
+                return monster
     
     def get_workshop_for_item(self, item: str) -> str :
         return self._item_data[item]["craft"]["skill"]
@@ -155,7 +170,7 @@ class WorldState:
     def _bank_contains_item(self, item: str) -> bool:
         return item in self._bank_data
     
-    def get_best_tool_for_skill_in_bank(self, skill: str) -> str | None:
+    def get_best_tool_for_skill_in_bank(self, skill: str) -> Tuple[str, int] | None:
         tools = [
             item for item in self._bank_data 
             if self._item_data[item]["subtype"] == "tool"
@@ -166,7 +181,7 @@ class WorldState:
             best_tool = sorted([
                 (tool, [effect["value"] for effect in self._item_data[tool]["effects"] if effect["code"] == skill][0])
                 for tool in tools
-            ])[0][0]
+            ])[0]
 
             return best_tool
         else:
@@ -175,3 +190,12 @@ class WorldState:
     def get_best_weapon_for_monster_in_bank(self, monster: str) -> str | None:
         monster_data = self._monster_data[monster]
         raise NotImplementedError()
+    
+    def get_gathering_skill_of_item(self, item: str, skill: str) -> int:
+        """Get gathering skill of an item; lower value equates to higher power."""
+        if effects := self._item_data[item]["effects"]:
+            for effect in effects:
+                if effect["code"] == skill:
+                    return effect["value"]
+                
+        return 0

@@ -56,39 +56,6 @@ class ActionPlanner:
 
         self.world_state = world_state
 
-    def _construct_item_list(self, selection: List[ItemSelection]) -> List[Dict]:
-        items = []
-        for item in selection:
-            quantity = self._get_desired_item_quantity(item)
-            if quantity == 0:
-                continue
-
-            items.append({
-                "item": item.item,
-                "quantity": quantity
-            })
-
-        return items
-    
-    def _get_desired_item_quantity(self, item: ItemSelection) -> int:
-        available_quantity = self.world_state.get_amount_of_item_in_bank(item.item)
-
-        # Get all available quantity, or clamp the quantity within the bound min/max attributes
-        if item.quantity.all:
-            quantity = available_quantity
-        else:
-            quantity = min(item.quantity.max, max(item.quantity.min, available_quantity))
-
-            # Check we're not trying to take more than we have
-            if quantity > available_quantity:
-                return 0
-            
-        # If set, apply a 'mutiple of' rounding; i.e. get quantity in multiples of 5, 10 etc.
-        if item.quantity.multiple_of:
-            quantity = (quantity // item.quantity.multiple_of) * item.quantity.multiple_of
-
-        return quantity
-
     def plan(self, intent: ActionIntent) -> Action | ActionGroup | ActionControlNode:
         match intent.intention:
             # Basic Intentions
@@ -242,9 +209,6 @@ class ActionPlanner:
                         ItemSelection(m["item"], ItemQuantity(min=m["quantity"] * craft_qty, multiple_of=m["quantity"] * craft_qty))
                         for m in required_materials
                     ]
-                
-                # Constuct list of items to withdraw from the bank
-                items_to_withdraw = self._construct_item_list(item_selection)
 
                 # Get location of the banks
                 bank_locations = self.world_state.get_bank_locations()

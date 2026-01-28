@@ -145,8 +145,13 @@ async def main():
 
 def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: WorldState, c: str):
     data = c.split() 
-    character_name = data[0].title().strip()
-    action_kw = data[1].lower().strip()
+
+    try:
+        character_name = data[0].title().strip()
+        action_kw = data[1].lower().strip()
+    except:
+        print("bad input")
+        return
 
     agent = scheduler.agents[character_name]
 

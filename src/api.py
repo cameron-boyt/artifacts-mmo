@@ -130,6 +130,11 @@ class APIClient:
                 self.logger.warning("Character already at destination.")
                 outcome = ActionOutcome.FAIL_CONTINUE
 
+            case 493:
+                # Character level too low
+                self.logger.warning("Character level too low.")
+                outcome = ActionOutcome.FAIL
+
             case 497:
                 # Character inventory is full
                 self.logger.warning("Character inventory is full.")

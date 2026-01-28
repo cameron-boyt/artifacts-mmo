@@ -1,8 +1,10 @@
 from typing import TYPE_CHECKING, Dict, List, Tuple, Any
-from action import Action, ActionGroup, ActionCondition, ActionOutcome, ActionResult, CharacterAction
-from api import APIClient
+from action import Action, ActionGroup, ActionCondition, ActionOutcome, CharacterAction
+from api import APIClient, ActionResult
 import logging
 from worldstate import WorldState
+import time
+from helpers import *
 
 if TYPE_CHECKING:
     from src.scheduler import ActionScheduler
@@ -26,7 +28,7 @@ class CharacterAgent:
         self.cooldown_expires_at: float = 0.0
 
     ## Helper Functions
-    def get_closest_location(self, locations: List[Tuple[int, int]]) -> Tuple[int, int]:
+    def _get_closest_location(self, locations: List[Tuple[int, int]]) -> Tuple[int, int]:
         """Get the location which is the shortest distance from the agent."""
         shortest_distance = 9999
         best_location = (0, 0)
@@ -38,6 +40,40 @@ class CharacterAgent:
                 best_location = location
 
         return best_location
+
+    def _construct_item_list(self, selection: List[ItemSelection]) -> List[Dict]:
+        items = []
+        for item in selection:
+            quantity = self._get_desired_item_quantity(item)
+            if quantity == 0:
+                # Failed to meet one of the item requests
+                return []
+
+            items.append({
+                "code": item.item,
+                "quantity": quantity
+            })
+
+        return items
+    
+    def _get_desired_item_quantity(self, item: ItemSelection) -> int:
+        available_quantity = self.world_state.get_amount_of_item_in_bank(item.item)
+
+        # Get all available quantity, or clamp the quantity within the bound min/max attributes
+        if item.quantity.all:
+            quantity = available_quantity
+        else:
+            quantity = min(item.quantity.max, max(item.quantity.min, available_quantity))
+
+            # Check we're not trying to take more than we have
+            if quantity > available_quantity:
+                return 0
+            
+        # If set, apply a 'mutiple of' rounding; i.e. get quantity in multiples of 5, 10 etc.
+        if item.quantity.multiple_of:
+            quantity = (quantity // item.quantity.multiple_of) * item.quantity.multiple_of
+
+        return quantity
     
     def get_number_of_items_in_inventory(self) -> int:
         """Get the total number of items in the agent's inventory"""
@@ -114,10 +150,14 @@ class CharacterAgent:
                 if action.params.get("previous", False):
                     x, y = self.context.get("previous_location")
                 elif locations := action.params.get("closest_of", []):
-                    x, y = self.get_closest_location(locations)
+                    x, y = self._get_closest_location(locations)
                 else:
                     x = action.params["x"]
                     y = action.params["y"]
+
+                # If we're already there, don't move
+                if (x, y) == (self.char_data["x"],  self.char_data["y"]):
+                    return ActionOutcome.CANCEL
 
                 self.context["previous_location"] = (self.char_data["x"],  self.char_data["y"])
                 result = await self.api_client.move(self.name, x, y)
@@ -131,6 +171,12 @@ class CharacterAgent:
         
             ## GATHERING ##
             case CharacterAction.GATHER:
+                resource = self.world_state.get_resource_at_location(self.char_data["x"], self.char_data["y"])
+                resource_data = self.world_state.get_data_for_resource(resource)
+                resource_level = resource_data["level"]
+                if self.char_data["level"] < resource_level:
+                    return ActionOutcome.FAIL
+                
                 result = await self.api_client.gather(self.name)
         
             ## BANKING ##
@@ -138,6 +184,8 @@ class CharacterAgent:
                 match action.params.get("preset", "none"):
                     case "all":
                         items_to_deposit = [{ "code": item["code"], "quantity": item["quantity"] } for item in self.char_data["inventory"] if item["code"] != '']
+                        if not items_to_deposit:
+                            return ActionOutcome.CANCEL
                     case _:
                         items_to_deposit = []
                         for deposit in action.params.get("items", []):
@@ -152,10 +200,17 @@ class CharacterAgent:
                     case "gathering":
                         if skill := action.params.get("sub_preset"):
                             if best_tool := self.world_state.get_best_tool_for_skill_in_bank(skill):
+                                # If current tool is same or better, don't bother withdrawing
+                                equipped_item = self.char_data["weapon_slot"]
+                                if self.world_state.get_gathering_skill_of_item(equipped_item, skill) <= best_tool["power"]:
+                                    self.context["last_withdrawn"] = []
+                                    return ActionOutcome.CANCEL
+
                                 items_to_withdraw = [{ "code": best_tool, "quantity": 1 }]
                                 self.context["last_withdrawn"] = items_to_withdraw
                         
                         if not items_to_withdraw:
+                            self.context["last_withdrawn"] = []
                             return ActionOutcome.CANCEL
                             
                     case "fighting":
@@ -165,54 +220,48 @@ class CharacterAgent:
                             self.context["last_withdrawn"] = items_to_withdraw
                         
                         if not items_to_withdraw:
+                            self.context["last_withdrawn"] = []
                             return ActionOutcome.CANCEL
                     case _:
                         # Construct a list of items that need to be withdrawn
-                        items_to_withdraw = []
+                        item_selection = action.params.get("items")
+                        needed_quantity_only = action.params.get("needed_quantity_only", False)
+                        withdraw_until_inv_full = action.params.get("withdraw_until_inv_full", False)
 
-                        # Also, heck how many items are needed to be withdrawn
-                        total_items_needed = 0
-                        items_already_in_inv = 0
+                        items_to_withdraw = self._construct_item_list(item_selection)
 
-                        for withdraw in action.params.get("items", []):
-                            quantity_to_withdraw = int(withdraw["quantity"])
-                            items_to_withdraw.append({ "code": withdraw["item"], "quantity": quantity_to_withdraw })
+                        if not items_to_withdraw:
+                            return ActionOutcome.FAIL
 
-                            total_items_needed += int(withdraw["quantity"])
-                            items_already_in_inv += self.get_quantity_of_item_in_inventory(withdraw["item"])
+                        # Withdraw multiple sets of the desired items until the inventory is full
+                        if withdraw_until_inv_full:
+                            # Also, check how many items are needed to be withdrawn
+                            total_items_needed = 0
+                            items_already_in_inv = 0
 
-                        if total_items_needed == 0:
-                            print("?")
+                            for withdraw in items_to_withdraw:
+                                total_items_needed += int(withdraw["quantity"])
+                                items_already_in_inv += self.get_quantity_of_item_in_inventory(withdraw["code"])
 
-                        if action.params.get("withdraw_until_inv_full", False):
                             # Maximise the number of item sets we can withdraw
                             available_inv_space = self.get_free_inventory_spaces()
-                            sets_to_withdraw = (available_inv_space - items_already_in_inv) // total_items_needed
-
-                            # Check we can actually withdraw this number of sets
-                            all_good = False
-                            for n in range(sets_to_withdraw, 0, -1):
-                                for item in items_to_withdraw:
-                                    if self.world_state.get_amount_of_item_in_bank(item["code"]) < item["quantity"] * n:
-                                        break
-
-                                    all_good = True
-
-                                if all_good:
-                                    break
+                            max_sets_to_withdraw = (available_inv_space - items_already_in_inv) // total_items_needed
                             
-                            if n == 0:
+                            # Check we can actually withdraw this number of sets
+                            get_min_sets = lambda item: max(n for n in range(max_sets_to_withdraw, 0, -1) if self.world_state.get_amount_of_item_in_bank(item["code"]) >= item["quantity"] * n)
+                            sets_to_withdraw = min([get_min_sets(withdraw) for withdraw in items_to_withdraw])
+
+                            if sets_to_withdraw == 0:
                                 return ActionOutcome.CANCEL
                             
-                            for item in items_to_withdraw:
-                                item["quantity"] *= n
+                            for withdraw in items_to_withdraw:
+                                withdraw["quantity"] *= sets_to_withdraw
 
                         # If we only want to withdraw the needed amount, check how much we have in the inventory
-                        if action.params.get("needed_quantity_only", False):
+                        if needed_quantity_only:
                             for item in items_to_withdraw:
                                 quantity_in_inv = self.get_quantity_of_item_in_inventory(item["code"])
                                 item["quantity"] -= quantity_in_inv
-
 
                 # Reserve the chosen items
                 reservation_id = self.world_state.reserve_bank_items(items_to_withdraw)
@@ -234,8 +283,13 @@ class CharacterAgent:
             case CharacterAction.EQUIP:
                 match action.params.get("context", "none"):
                     case "last_withdrawn":
-                        last_withdraw = self.context["last_withdrawn"][0]
-                        item_code = last_withdraw["code"]
+                        last_withdraw = self.context.get("last_withdrawn", [])
+
+                        # If nothing was withdrawn previously, cancel out
+                        if not last_withdraw:
+                            return ActionOutcome.CANCEL
+                        
+                        item_code = last_withdraw[0]["code"]
                         item_slot = self.world_state.get_equip_slot_for_item(item_code)
 
                     case _:
@@ -271,8 +325,16 @@ class CharacterAgent:
                 raise Exception(f"[{self.name}] Unknown action type: {action.type}")
             
         
-        if result.data:
+        if result.response:
+            # Update character state
+            if not "data" in result.response:
+                print("???")
+
             self.char_data = result.response.get("data").get("character")
+
+            # Update the agent's cooldown
+            new_cooldown = result.response.get("data").get("cooldown").get("remaining_seconds")
+            self.cooldown_expires_at = time.time() + new_cooldown
             
             # Update bank
             if bank_data := result.response.get("data").get("bank"):

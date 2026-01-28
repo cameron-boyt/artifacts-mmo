@@ -22,6 +22,7 @@ class CharacterAction(Enum):
 
 class ActionCondition(Enum):
     NONE = auto()
+    AT_LOCATION = auto()
     INVENTORY_FULL = auto()
     INVENTORY_EMPTY = auto()
     INVENTORY_HAS_AVAILABLE_SPACE = auto()

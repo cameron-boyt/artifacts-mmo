@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 
 @dataclass
 class ItemQuantity:
@@ -16,6 +17,13 @@ class ItemQuantity:
         if not self.all:
             # If not requesting all of an item, require a min or max selection
             assert((self.max is not None and self.max > 0) or (self.min is not None and self.min > 0))
+
+            # If not defined, set min to -INF and max to +INF
+            if not self.max:
+                self.max = math.inf
+
+            if not self.min:
+                self.min = -math.inf
 
 @dataclass
 class ItemSelection:

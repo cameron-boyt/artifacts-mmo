@@ -102,21 +102,17 @@ class ActionScheduler:
                 await asyncio.sleep(remaining_cooldown)
                                     
             # Execute the action
-            result = await agent.perform(action)
+            outcome = await agent.perform(action)
 
             # Check action result
-            match result.result:
+            match outcome:
                 case ActionOutcome.SUCCESS:
-                    # Update the agent's cooldown
-                    new_cooldown = result.response.get("data").get("cooldown").get("remaining_seconds")
-                    agent.cooldown_expires_at = time.time() + new_cooldown
-
                     # Check if the repeat until condition has been met for this action
                     if self._evaluate_condition(agent, action.until):
                         return True
                 
                 case ActionOutcome.FAIL:
-                    self.logger.warning(f"[{agent.name}] ")
+                    self.logger.warning(f"[{agent.name}] Action {action.type} failed.")
                     return False
 
                 case ActionOutcome.FAIL_CONTINUE:
@@ -126,6 +122,7 @@ class ActionScheduler:
                 
                 case ActionOutcome.CANCEL:
                     # A cancelled action can be treated as a success with no state updates
+                    self.logger.debug(f"[{agent.name}] Action {action.type} was cancelled.")
                     return True
 
     async def _process_action_group(self, agent: CharacterAgent, action_group: ActionGroup) -> bool:
@@ -133,10 +130,10 @@ class ActionScheduler:
         while True:
             # Traverse through the grouped actions and execute them in sequence
             for sub_action in action_group.actions:
-                sub_action_succesful = await self._process_node(agent, sub_action)
+                sub_action_successful = await self._process_node(agent, sub_action)
 
                 # If a sub_action was unsuccessful, discard the rest of the group
-                if not sub_action_succesful:
+                if not sub_action_successful:
                     return False
                 
             # Check if the repeat until condition has been met for this action
