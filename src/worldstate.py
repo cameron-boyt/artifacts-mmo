@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Any
 import logging
 from helpers import *
 import uuid
@@ -53,13 +53,13 @@ class WorldState:
                 interactions.setdefault(content_type, {}).setdefault(content_code, set()).add((x, y))
 
         return WorldInteractions(
-            interactions["resource"],
-            interactions["monster"],
-            interactions["workshop"],
-            interactions["bank"]["bank"],
-            interactions["grand_exchange"],
-            interactions["tasks_master"],
-            interactions["npc"]
+            interactions.get("resource", {}),
+            interactions.get("monster", {}),
+            interactions.get("workshop", {}),
+            interactions.get("bank", {}).get("bank", {}),
+            interactions.get("grand_exchange", {}),
+            interactions.get("tasks_master", {}),
+            interactions.get("npc", {})
         ) 
     
     def _generate_resource_sources(self):
@@ -111,7 +111,7 @@ class WorldState:
         return locations
     
     def get_monster_at_location(self, x: int, y: int) -> str | None:
-        for monster, locations in self._interactions.monster.items():
+        for monster, locations in self._interactions.monsters.items():
             if (x, y) in locations:
                 return monster
     
@@ -134,6 +134,10 @@ class WorldState:
     def get_workshop_locations(self, skill: str) -> List[Tuple[int, int]]:
         return self._interactions.workshops[skill]
     
+    def update_bank_data(self, bank_data: Dict[str, Any]):
+        for item in bank_data:
+            self._bank_data[item["code"]] = item["quantity"]
+
     def get_amount_of_item_in_bank(self, item: str) -> int:
         if self._bank_contains_item(item):
             amount_in_bank = self._bank_data[item]
@@ -178,10 +182,10 @@ class WorldState:
         ]
 
         if len(tools) > 0:
-            best_tool = sorted([
+            best_tool = min([
                 (tool, [effect["value"] for effect in self._item_data[tool]["effects"] if effect["code"] == skill][0])
                 for tool in tools
-            ])[0]
+            ], key=lambda t: t[1])
 
             return best_tool
         else:

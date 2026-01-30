@@ -22,7 +22,6 @@ class CharacterAction(Enum):
 
 class ActionCondition(Enum):
     NONE = auto()
-    AT_LOCATION = auto()
     INVENTORY_FULL = auto()
     INVENTORY_EMPTY = auto()
     INVENTORY_HAS_AVAILABLE_SPACE = auto()
@@ -35,6 +34,7 @@ class ActionCondition(Enum):
 class ActionOutcome(Enum):
     SUCCESS = auto()
     FAIL = auto()
+    FAIL_RETRY = auto()
     FAIL_CONTINUE = auto()
     CANCEL = auto()
 
@@ -57,7 +57,7 @@ class Action:
 @dataclass
 class ActionGroup:
     """A group or sequence of actions to be completed."""
-    actions: List[Action | ActionGroup]
+    actions: List[Action | ActionGroup | ActionControlNode]
     until: ActionConditionExpression | None = None
 
 @dataclass(frozen=True)
@@ -91,7 +91,7 @@ class ActionConditionExpression:
 class ActionControlNode:
     control_operator: ControlOperator
     branches: List[Tuple[ActionConditionExpression, ActionGroup]] | None = None
-    fail_path: ActionConditionExpression | None = None
+    fail_path: Action | ActionGroup | ActionControlNode | None = None
     control_node: ActionControlNode | None = None
     until: ActionConditionExpression | None = None
 

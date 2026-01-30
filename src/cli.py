@@ -240,28 +240,26 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: World
 
         case 'bank':
             if args[0] == 'deposit' and args[1] == 'gold':
-                params_dict = { "quantity": args[2] }
-                action = Action(CharacterAction.BANK_DEPOSIT_GOLD, params_dict)
+                node = planner.plan(ActionIntent(Intention.DEPOSIT_GOLD, quantity=int(args[2])))
             elif args[0] == 'withdraw' and args[1] == 'gold':
-                params_dict = { "quantity": args[2] }
-                action = Action(CharacterAction.BANK_WITHDRAW_GOLD, params_dict)
+                node = planner.plan(ActionIntent(Intention.WITHDRAW_GOLD, quantity=int(args[2])))
             elif args[0] == 'deposit' and args[1] == 'item':
                 if args[2] == "all":
-                    params_dict = { "preset": "all"  }
+                    node = planner.plan(ActionIntent(Intention.DEPOSIT_ITEMS, preset="all"))
                 else:
-                    params_dict = { "items": [] }
+                    items = [] 
                     for i in range(2, len(args), 2):
-                        params_dict["items"].append({ "code": args[i], "quantity": args[i + 1] })
+                       items.append({ "code": args[i], "quantity": args[i + 1] })
 
-                action = Action(CharacterAction.BANK_DEPOSIT_ITEM, params_dict)
+                    node = planner.plan(ActionIntent(Intention.DEPOSIT_ITEMS, items=items))
             elif args[0] == 'withdraw' and args[1] == 'item':
-                params_dict = { "items": [] }
+                items = [] 
                 for i in range(2, len(args), 2):
-                    params_dict["items"].append({ "code": args[i], "quantity": args[i + 1] })
+                    items.append({ "code": args[i], "quantity": args[i + 1] })
 
-                action = Action(CharacterAction.BANK_WITHDRAW_ITEM, params_dict)
+                node = planner.plan(ActionIntent(Intention.WITHDRAW_ITEMS, items=items))
             
-            scheduler.queue_action_node(character_name, action)
+            scheduler.queue_action_node(character_name, node)
 
         # create combo actions
         case 'gather-forever':

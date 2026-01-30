@@ -24,9 +24,11 @@ class Intention(Enum):
     UNEQUIP = auto()
     USE = auto()
 
-    WITHDRAW = auto()
-    DEPOSIT = auto()
-    DEPOSIT_ALL = auto()
+    WITHDRAW_ITEMS = auto()
+    DEPOSIT_ITEMS = auto()
+
+    WITHDRAW_GOLD = auto()
+    DEPOSIT_GOLD = auto()
 
     # Complex Intentions
     PREPARE_FOR_GATHERING =  auto()
@@ -108,7 +110,7 @@ class ActionPlanner:
             case Intention.USE:
                 raise NotImplementedError()
             
-            case Intention.WITHDRAW:
+            case Intention.WITHDRAW_ITEMS:
                 items: List[ItemSelection] = intent.params.get("items")
                 needed_quantity_only: bool = intent.params.get("needed_quantity_only", False)
                 withdraw_until_inv_full: bool = intent.params.get("withdraw_until_inv_full", False)
@@ -118,20 +120,37 @@ class ActionPlanner:
                     bank_withdraw_item(items=items, needed_quantity_only=needed_quantity_only, withdraw_until_inv_full=withdraw_until_inv_full)
                 )
             
-            case Intention.DEPOSIT:
-                items: List[ItemSelection] = intent.params.get("items")
-                items_to_deposit = self._construct_item_list(items)
+            case Intention.DEPOSIT_ITEMS:
                 bank_locations = self.world_state.get_bank_locations()
+                match intent.params.get("preset", "none"):
+                    case "all":
+                        return action_group(
+                            move(closest_of=bank_locations),
+                            bank_deposit_item(preset="all")
+                        )
+                    
+                    case _:
+                        items: List[ItemSelection] = intent.params.get("items")
+                        items_to_deposit = self._construct_item_list(items)
+                        return action_group(
+                            move(closest_of=bank_locations),
+                            bank_deposit_item(items=items_to_deposit)
+                        )
+            
+            case Intention.WITHDRAW_GOLD:
+                bank_locations = self.world_state.get_bank_locations()
+                quantity: int = intent.params.get("quantity")
                 return action_group(
                     move(closest_of=bank_locations),
-                    bank_deposit_item(items=items_to_deposit)
+                    bank_withdraw_gold(quantity=quantity)
                 )
             
-            case Intention.DEPOSIT_ALL:
+            case Intention.DEPOSIT_GOLD:
                 bank_locations = self.world_state.get_bank_locations()
+                quantity: int = intent.params.get("quantity")
                 return action_group(
                     move(closest_of=bank_locations),
-                    bank_deposit_item(preset="all")
+                    bank_deposit_gold(quantity=quantity)
                 )
             
             # Complex Intentions
@@ -276,6 +295,7 @@ class ActionPlanner:
                 
                 # Generate a COLLECT_THEN_CRAFT, but override the failpath with the gathering
                 act_collect_then_craft = self.plan(ActionIntent(Intention.COLLECT_THEN_CRAFT, item=craft_item, quantity=craft_qty, as_many_as_possible=craft_max))
+                assert isinstance(act_collect_then_craft, ActionControlNode)
                 act_collect_then_craft.fail_path = act_gather_materials
                 
                 return act_collect_then_craft

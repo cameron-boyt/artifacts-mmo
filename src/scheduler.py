@@ -94,6 +94,9 @@ class ActionScheduler:
 
     async def _process_single_action(self, agent: CharacterAgent, action: Action) -> bool:
         """Process a single action to be made by an agent, repeating as defined."""
+        retry_count = 0
+        retry_max = 3
+
         while True:
             # Wait for the remaining cooldown for the worker
             remaining_cooldown = max(0, agent.cooldown_expires_at - time.time())
@@ -114,6 +117,15 @@ class ActionScheduler:
                 case ActionOutcome.FAIL:
                     self.logger.warning(f"[{agent.name}] Action {action.type} failed.")
                     return False
+                
+                case ActionOutcome.FAIL_RETRY:
+                    self.logger.warning(f"[{agent.name}] Action {action.type} failed, but will be retried.")
+                    retry_count += 1
+                    if retry_count >= retry_max:
+                        return False
+                    else:
+                        await asyncio.sleep(1)
+                        continue
 
                 case ActionOutcome.FAIL_CONTINUE:
                     # The action failed, but we can safely continue the action sequence
@@ -190,10 +202,10 @@ class ActionScheduler:
                     condition_met = False
                 
                 case ActionCondition.INVENTORY_FULL:
-                    condition_met = agent.is_inventory_full()
+                    condition_met = agent.inventory_full()
                 
                 case ActionCondition.INVENTORY_EMPTY:
-                    condition_met = agent.is_inventory_empty()
+                    condition_met = agent.inventory_empty()
 
                 case ActionCondition.INVENTORY_HAS_AVAILABLE_SPACE:
                     free_spaces = expression.parameters["spaces"]
