@@ -138,6 +138,13 @@ async def main():
     for character in characters["data"]:
         scheduler.add_character(character, world_state)
 
+    # Run some starting commands
+    parse_input(planner, scheduler, world_state, "Cameron craft-or-gather ash_plank max")
+    parse_input(planner, scheduler, world_state, "Maett craft-or-gather copper_bar max")
+    parse_input(planner, scheduler, world_state, "Oscar craft-or-gather cooked_gudgeon max")
+    parse_input(planner, scheduler, world_state, "Jayne gather-forever sunflower")
+    parse_input(planner, scheduler, world_state, "Moira gather-forever sunflower")
+
     while True:
         c = await asyncio.to_thread(input, "Enter Command: ")
         parse_input(planner, scheduler, world_state, c)
@@ -220,19 +227,21 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: World
             scheduler.queue_action_node(character_name, node)
 
         case 'craft':
+            if not world.is_an_item(args[0]):
+                print("not an item")
+                return
+            
+            if not world.item_is_craftable(args[0]):
+                print("item not craftable")
+                return
+            
             if len(args) == 2:
-                if world.is_an_item(args[0]):
-                    if args[1] == "max":
-                        node = planner.plan(ActionIntent(Intention.CRAFT, item=args[0], as_many_as_possible=True))
-                    else:
-                        node = planner.plan(ActionIntent(Intention.CRAFT, item=args[0], quantity=args[1]))
+                if args[1] == "max":
+                    node = planner.plan(ActionIntent(Intention.CRAFT, item=args[0], as_many_as_possible=True))
                 else:
-                    print("not an item")
+                    node = planner.plan(ActionIntent(Intention.CRAFT, item=args[0], quantity=args[1]))
             elif len(args) == 1:
-                if world.is_an_item(args[0]):
-                    node = planner.plan(ActionIntent(Intention.CRAFT, item=args[0], quantity=1))
-                else:
-                    print("not an item")
+                node = planner.plan(ActionIntent(Intention.CRAFT, item=args[0], quantity=1))
             else:
                 return
             
@@ -314,8 +323,12 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: World
                 return 
             
             if len(args) > 0:
-                if not world.is_an_item(args[0]): 
+                if not world.is_an_item(args[0]):
                     print("not an item")
+                    return
+                
+                if not world.item_is_craftable(args[0]):
+                    print("item not craftable")
                     return
                 
                 item = args[0]
@@ -336,8 +349,12 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: World
 
         case 'craft-or-gather':
             if len(args) == 2:
-                if not world.is_an_item(args[0]): 
+                if not world.is_an_item(args[0]):
                     print("not an item")
+                    return
+                
+                if not world.item_is_craftable(args[0]):
+                    print("item not craftable")
                     return
                 
                 item = args[0]

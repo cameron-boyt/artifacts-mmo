@@ -1,6 +1,17 @@
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, auto
+from typing import List
 import math
+
+@dataclass
+class ItemOrder:
+    items: ItemSelection
+    set_spec: SetSpecMode
+
+@dataclass
+class ItemSelection:
+    item: str
+    quantity: ItemQuantity
 
 @dataclass
 class ItemQuantity:
@@ -26,10 +37,16 @@ class ItemQuantity:
             if not self.min:
                 self.min = -math.inf
 
+class SetSpecMode(Enum):
+    EXACT = auto()
+    DYANAMIC = auto()
+
 @dataclass
-class ItemSelection:
-    item: str
-    quantity: ItemQuantity
+class ItemSetSpec:
+    mode: SetSpecMode
+    exact: int | None
+    multiple: int | None
+
 
 class ItemSlot(Enum):
     WEAPON = "weapon"

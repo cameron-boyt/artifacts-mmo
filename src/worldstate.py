@@ -86,7 +86,10 @@ class WorldState:
     
     def is_a_monster(self, monster: str) -> bool:
         return monster in self._interactions.monsters
-
+    
+    def item_is_craftable(self, item: str) -> bool:
+        return self._item_data[item].get("craft") is not None
+    
     def get_locations_of_resource(self, resource: str) -> List[Tuple[int, int]]:
         resource_tile = self._resource_sources[resource]
 
@@ -119,7 +122,7 @@ class WorldState:
         return self._item_data[item]["craft"]["skill"]
     
     def get_equip_slot_for_item(self, item: str) -> str:
-        return self._item_data[item]["slot"]
+        return self._item_data[item]["type"]
     
     def get_gather_skill_for_resource(self, item: str) -> str:
         return self._item_data[item]["subtype"]

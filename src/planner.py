@@ -131,10 +131,9 @@ class ActionPlanner:
                     
                     case _:
                         items: List[ItemSelection] = intent.params.get("items")
-                        items_to_deposit = self._construct_item_list(items)
                         return action_group(
                             move(closest_of=bank_locations),
-                            bank_deposit_item(items=items_to_deposit)
+                            bank_deposit_item(items=items)
                         )
             
             case Intention.WITHDRAW_GOLD:
@@ -163,7 +162,8 @@ class ActionPlanner:
                     bank_all_items(),
                     action_group(
                         bank_withdraw_item(preset=f"gathering", sub_preset=skill),
-                        equip(context="last_withdrawn")
+                        equip(context="last_withdrawn"),
+                        bank_all_items()
                     ) 
                 )
 
@@ -175,7 +175,8 @@ class ActionPlanner:
                     bank_all_items(),
                     action_group(
                         bank_withdraw_item(preset=f"fighting"),
-                        equip(context="last_withdrawn")
+                        equip(context="last_withdrawn"),
+                        bank_all_items()
                     ) 
                 )
 
@@ -202,8 +203,7 @@ class ActionPlanner:
                     bank_action = bank_all_items()
                 else:
                     items: List[ItemSelection] = intent.params.get("items")
-                    items_to_deposit = self._construct_item_list(items)
-                    bank_action = bank_deposit_item(items=items_to_deposit)
+                    bank_action = bank_deposit_item(items=items)
         
                 bank_locations = self.world_state.get_bank_locations()
                 return action_group(
@@ -215,19 +215,20 @@ class ActionPlanner:
             case Intention.COLLECT_THEN_CRAFT:
                 craft_item = intent.params.get("item")
                 craft_max = intent.params.get("as_many_as_possible", False)
-                craft_qty = 1 if craft_max else intent.params.get("quantity", 0)
+                craft_qty = intent.params.get("quantity", 1)
 
                 required_materials = self.world_state.get_crafting_materials_for_item(craft_item, craft_qty)
+                items=[
+                    ItemSelection(m["item"], ItemQuantity(min=m["quantity"], multiple_of=m["quantity"]))
+                    for m in required_materials
+                ]
+                
                 if craft_max:
-                    item_selection = [
-                        ItemSelection(m["item"], ItemQuantity(min=m["quantity"], multiple_of=m["quantity"]))
-                        for m in required_materials
-                    ]
+                    set_spec = ItemSetSpec(SetSpecMode.DYANAMIC)
                 else:
-                    item_selection = [
-                        ItemSelection(m["item"], ItemQuantity(min=m["quantity"] * craft_qty, multiple_of=m["quantity"] * craft_qty))
-                        for m in required_materials
-                    ]
+                    set_spec=ItemSetSpec(SetSpecMode.EXACT, exact=craft_qty)
+                
+                item_order = ItemOrder(items, set_spec)
 
                 # Get location of the banks
                 bank_locations = self.world_state.get_bank_locations()
@@ -250,11 +251,11 @@ class ActionPlanner:
                 act_bank_all_then_withdraw= action_group(
                     move(closest_of=bank_locations),
                     bank_deposit_item(preset='all'),
-                    self.plan(ActionIntent(Intention.WITHDRAW, items=item_selection, needed_quantity_only=True, withdraw_until_inv_full=craft_max))
+                    self.plan(ActionIntent(Intention.WITHDRAW_ITEMS, items=item_order, needed_quantity_only=True, withdraw_until_inv_full=craft_max))
                 )
 
                 # Construct bank and withdraw action plan
-                act_move_to_bank_and_withdraw = self.plan(ActionIntent(Intention.WITHDRAW, items=item_selection, needed_quantity_only=True, withdraw_until_inv_full=craft_max))
+                act_move_to_bank_and_withdraw = self.plan(ActionIntent(Intention.WITHDRAW_ITEMS, items=item_order, needed_quantity_only=True, withdraw_until_inv_full=craft_max))
 
                 # Construct move to workshop and craft action plan
                 act_move_to_workshop_and_craft = self.plan(ActionIntent(Intention.CRAFT, item=craft_item, quantity=craft_qty, as_many_as_possible=craft_max))
@@ -287,7 +288,7 @@ class ActionPlanner:
                     action_group(
                         self.plan(ActionIntent(Intention.PREPARE_FOR_GATHERING, resource=material["item"])),
                         self.plan(ActionIntent(Intention.GATHER, resource=material["item"], until=OR(cond(ActionCondition.INVENTORY_FULL), cond__item_qty_in_inv_and_bank(material["item"], material["quantity"])))),
-                        self.plan(ActionIntent(Intention.DEPOSIT_ALL)),
+                        self.plan(ActionIntent(Intention.DEPOSIT_ITEMS, preset="all")),
                         until=cond__item_qty_in_inv_and_bank(material["item"], material["quantity"])
                     )
                     for material in required_materials

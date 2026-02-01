@@ -115,15 +115,16 @@ class ActionScheduler:
                         return True
                 
                 case ActionOutcome.FAIL:
-                    self.logger.warning(f"[{agent.name}] Action {action.type} failed.")
+                    self.logger.error(f"[{agent.name}] Action {action.type} failed.")
                     return False
                 
                 case ActionOutcome.FAIL_RETRY:
-                    self.logger.warning(f"[{agent.name}] Action {action.type} failed, but will be retried.")
                     retry_count += 1
                     if retry_count >= retry_max:
+                        self.logger.error(f"[{agent.name}] Action {action.type} failed.")
                         return False
                     else:
+                        self.logger.warning(f"[{agent.name}] Action {action.type} failed, but will be retried.")
                         await asyncio.sleep(1)
                         continue
 

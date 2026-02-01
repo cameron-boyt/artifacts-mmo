@@ -173,8 +173,11 @@ class CharacterAgent:
             case CharacterAction.GATHER:
                 resource = self.world_state.get_resource_at_location(self.char_data["x"], self.char_data["y"])
                 resource_data = self.world_state.get_data_for_resource(resource)
+                resource_skill = resource_data["skill"]
                 resource_level = resource_data["level"]
-                if self.char_data["level"] < resource_level:
+                charcter_skill_level = self.char_data[f"{resource_skill}_level"]
+                if charcter_skill_level < resource_level:
+                    self.logger.warning(f"[{self.name}] Skill '{resource_skill}' level (charcter_skill_level) insufficient to gather {resource} ({resource_level}).")
                     return ActionOutcome.FAIL
                 
                 api_result = await self.api_client.gather(self.name)
@@ -248,7 +251,10 @@ class CharacterAgent:
                             max_sets_to_withdraw = (available_inv_space - items_already_in_inv) // total_items_needed
                             
                             # Check we can actually withdraw this number of sets
-                            get_min_sets = lambda item: max(n for n in range(max_sets_to_withdraw, 0, -1) if self.world_state.get_amount_of_item_in_bank(item["code"]) >= item["quantity"] * n)
+                            def get_min_sets(item: str) -> int:
+                                amt_in_bank = self.world_state.get_amount_of_item_in_bank(item["code"])
+                                return max([0, *[n for n in range(max_sets_to_withdraw, 0, -1) if amt_in_bank >= item["quantity"] * n]])
+                            
                             sets_to_withdraw = min([get_min_sets(withdraw) for withdraw in items_to_withdraw])
 
                             if sets_to_withdraw == 0:
