@@ -141,6 +141,7 @@ class WorldState:
         return self._interactions.workshops[skill]
     
     def update_bank_data(self, bank_data: Dict[str, Any]):
+        self._bank_data = {}
         for item in bank_data:
             self._bank_data[item["code"]] = item["quantity"]
 

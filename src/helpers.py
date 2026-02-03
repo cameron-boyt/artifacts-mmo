@@ -21,25 +21,17 @@ class ItemQuantity:
     min: int | None = None
     max: int | None = None
     multiple_of: int | None = None
-    all: bool | None = None
 
     def __post_init__(self):
-        if self.all:
-            # If requesting all of an item, forbid a min/max selection and multiple_of flag
-            assert(not self.max)
-            assert(not self.min)
-            assert(not self.multiple_of)
+        # Require a min or max selection OR multiple of
+        assert(self.max > 0 or self.min > 0 or self.multiple_of)
 
-        if not self.all:
-            # If not requesting all of an item, require a min or max selection OR multiple of
-            assert(((self.max is not None and self.max > 0) or (self.min is not None and self.min > 0)) or self.multiple_of)
+        # If not defined, set min to -INF and max to +INF
+        if not self.max:
+            self.max = math.inf
 
-            # If not defined, set min to -INF and max to +INF
-            if not self.max:
-                self.max = math.inf
-
-            if not self.min:
-                self.min = -math.inf
+        if not self.min:
+            self.min = -math.inf
 
 class ItemSlot(Enum):
     WEAPON = "weapon"

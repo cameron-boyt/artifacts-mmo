@@ -220,7 +220,7 @@ class ActionPlanner:
 
                 required_materials = self.world_state.get_crafting_materials_for_item(craft_item, craft_qty)
                 items=[
-                    ItemSelection(m["item"], ItemQuantity(min=m["quantity"], multiple_of=m["quantity"]))
+                    ItemSelection(m["item"], ItemQuantity(min=m["quantity"], max=m["quantity"]))
                     for m in required_materials
                 ]
                 
@@ -258,16 +258,14 @@ class ActionPlanner:
                 
                 return IF(
                     (cond_materials_in_inv, act_move_to_workshop_and_craft),
-                    (cond_materials_in_inv_and_bank, action_group(
-                        IF(
-                            (cond_has_space_for_items, action_group(
-                                act_move_to_bank_and_withdraw,
-                                act_move_to_workshop_and_craft
-                            )),
-                            fail_path=action_group(
-                                act_bank_all_then_withdraw,
-                                act_move_to_workshop_and_craft
-                            )
+                    (cond_materials_in_inv_and_bank, IF(
+                        (cond_has_space_for_items, action_group(
+                            act_move_to_bank_and_withdraw,
+                            act_move_to_workshop_and_craft
+                        )),
+                        fail_path=action_group(
+                            act_bank_all_then_withdraw,
+                            act_move_to_workshop_and_craft
                         )
                     )),
                     fail_path=do_nothing()
@@ -283,9 +281,9 @@ class ActionPlanner:
                 act_gather_materials = action_group(*[
                     action_group(
                         self.plan(ActionIntent(Intention.PREPARE_FOR_GATHERING, resource=material["item"])),
-                        self.plan(ActionIntent(Intention.GATHER, resource=material["item"], until=OR(cond(ActionCondition.INVENTORY_FULL), cond__item_qty_in_inv_and_bank(material["item"], material["quantity"])))),
+                        self.plan(ActionIntent(Intention.GATHER, resource=material["item"], until=cond(ActionCondition.INVENTORY_FULL))),
                         self.plan(ActionIntent(Intention.DEPOSIT_ITEMS, preset="all")),
-                        until=cond__item_qty_in_inv_and_bank(material["item"], material["quantity"])
+                        until=cond(ActionCondition.FOREVER)
                     )
                     for material in required_materials
                 ])

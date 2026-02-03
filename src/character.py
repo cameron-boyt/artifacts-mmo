@@ -50,16 +50,35 @@ class CharacterAgent:
 
     def _construct_item_list(self, order: ItemOrder) -> List[Dict]:
         items = []
-        for item in order.items:
-            quantity = self._get_desired_item_quantity(item)
-            if quantity == 0:
-                # Failed to meet one of the item requests
-                return []
+        
+        per_set = {}
+        inv = {}
+        bank = {}
 
-            items.append({
-                "code": item.item,
-                "quantity": quantity
-            })
+        for item in order.items:
+            i = item.item
+            inv[i] = self.get_quantity_of_item_in_inventory(i)
+            bank[i] = self.world_state.get_amount_of_item_in_bank(i)
+
+            # Determine how many of the item we have available
+            if order.check_inv:
+                available_quantity = inv[i] + bank[i]
+            else:
+                available_quantity = bank[i]
+
+            # Clamp the quantity within the avilability count and the min/max bounds
+            if available_quantity < item.quantity.min:
+                return 0
+            else:
+                quantity = min(item.quantity.max, available_quantity)
+            
+            # If set, apply a 'multiple of' rounding; i.e. get quantity in multiples of 5, 10 etc.
+            if item.quantity.multiple_of:
+                quantity = (quantity // item.quantity.multiple_of) * item.quantity.multiple_of
+
+            per_set[i] = quantity
+
+            items.append({ "code": i, "quantity": quantity })
 
         # If we only want to withdraw the needed amount, check how much we have in the inventory
         if order.check_inv and not order.greedy_order:
@@ -69,16 +88,7 @@ class CharacterAgent:
 
         # Withdraw multiple sets of the desired items until the inventory is full
         if order.greedy_order:
-            per_set = {}
-            inv = {}
-            bank = {}
-            for item in items:
-                i = item["code"]
-                per_set[i] = item["quantity"]
-                inv[i] = self.get_quantity_of_item_in_inventory(i)
-                bank[i] = self.world_state.get_amount_of_item_in_bank(i)
-
-            items_per_set = sum(item["quantity"] for item in items)
+            items_per_set = sum(per_set.values())
             
             if order.check_inv:
                 sets_from_inv = min(floor(inv[item["code"]] / per_set[item["code"]]) for item in items)
@@ -90,33 +100,14 @@ class CharacterAgent:
 
             additional_sets_needed = max(0, sets_target - sets_from_inv)
 
-            need = [{"code": item["code"], "quantity": max(0, additional_sets_needed * per_set[item["code"]])} for item in items]
-
             if order.check_inv:
-                need = [{"code": item["code"], "quantity": item["quantity"] - inv[item["code"]]} for item in need]
+                need = [{"code": item["code"], "quantity": max(0, additional_sets_needed * per_set[item["code"]]) - inv[item["code"]]} for item in items]
+            else:
+                need = [{"code": item["code"], "quantity": max(0, additional_sets_needed * per_set[item["code"]])} for item in need]
 
             items = need
 
         return items
-    
-    def _get_desired_item_quantity(self, item: ItemSelection) -> int:
-        available_quantity = self.world_state.get_amount_of_item_in_bank(item.item)
-
-        # Get all available quantity, or clamp the quantity within the bound min/max attributes
-        if item.quantity.all:
-            quantity = available_quantity
-        else:
-            # Check we're not trying to take more than we have
-            if available_quantity < item.quantity.min:
-                return 0
-            else:
-                quantity = min(item.quantity.max, available_quantity)
-            
-        # If set, apply a 'mutiple of' rounding; i.e. get quantity in multiples of 5, 10 etc.
-        if item.quantity.multiple_of:
-            quantity = (quantity // item.quantity.multiple_of) * item.quantity.multiple_of
-
-        return quantity
     
     def get_number_of_items_in_inventory(self) -> int:
         """Get the total number of items in the agent's inventory"""
@@ -270,9 +261,6 @@ class CharacterAgent:
 
                         items_to_withdraw = self._construct_item_list(item_order)
 
-                        if not items_to_withdraw:
-                            return ActionOutcome.FAIL
-
                 # Clean up item withdrawals
                 items_to_withdraw = [item for item in items_to_withdraw if item["quantity"] > 0]
 
@@ -334,7 +322,11 @@ class CharacterAgent:
                                 lowest_multiple = min(lowest_multiple, inv_item["quantity"] // req_item["quantity"])
 
                     quantity = lowest_multiple
-                        
+                
+                if quantity == 0:
+                    self.logger.warning(f"[{self.name}] Cannot craft zero of an item.")
+                    return ActionOutcome.CANCEL
+                
                 api_result = await self.api_client.craft(self.name, item, quantity)
         
             case _:
@@ -350,7 +342,7 @@ class CharacterAgent:
             self.cooldown_expires_at = time.time() + new_cooldown
             
             # Update bank
-            if bank_data := api_result.response.get("data").get("bank"):
+            if bank_data := api_result.response.get("data").get("bank", {}):
                 self.world_state.update_bank_data(bank_data)
 
             return ActionOutcome.SUCCESS
