@@ -111,13 +111,11 @@ class ActionPlanner:
                 raise NotImplementedError()
             
             case Intention.WITHDRAW_ITEMS:
-                items: List[ItemSelection] = intent.params.get("items")
-                needed_quantity_only: bool = intent.params.get("needed_quantity_only", False)
-                withdraw_until_inv_full: bool = intent.params.get("withdraw_until_inv_full", False)
+                items: ItemOrder = intent.params.get("items")
                 bank_locations = self.world_state.get_bank_locations()
                 return action_group(
                     move(closest_of=bank_locations),
-                    bank_withdraw_item(items=items, needed_quantity_only=needed_quantity_only, withdraw_until_inv_full=withdraw_until_inv_full)
+                    bank_withdraw_item(items=items)
                 )
             
             case Intention.DEPOSIT_ITEMS:
@@ -223,12 +221,7 @@ class ActionPlanner:
                     for m in required_materials
                 ]
                 
-                if craft_max:
-                    set_spec = ItemSetSpec(SetSpecMode.DYANAMIC)
-                else:
-                    set_spec=ItemSetSpec(SetSpecMode.EXACT, exact=craft_qty)
-                
-                item_order = ItemOrder(items, set_spec)
+                item_order = ItemOrder(items, greedy_order=craft_max, check_inv=True)
 
                 # Get location of the banks
                 bank_locations = self.world_state.get_bank_locations()

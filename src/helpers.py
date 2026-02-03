@@ -5,8 +5,9 @@ import math
 
 @dataclass
 class ItemOrder:
-    items: ItemSelection
-    set_spec: SetSpecMode
+    items: List[ItemSelection]
+    greedy_order: bool
+    check_inv: bool
 
 @dataclass
 class ItemSelection:
@@ -15,8 +16,8 @@ class ItemSelection:
 
 @dataclass
 class ItemQuantity:
-    max: int | None = None
     min: int | None = None
+    max: int | None = None
     multiple_of: int | None = None
     all: bool | None = None
 
@@ -36,17 +37,6 @@ class ItemQuantity:
 
             if not self.min:
                 self.min = -math.inf
-
-class SetSpecMode(Enum):
-    EXACT = auto()
-    DYANAMIC = auto()
-
-@dataclass
-class ItemSetSpec:
-    mode: SetSpecMode
-    exact: int | None
-    multiple: int | None
-
 
 class ItemSlot(Enum):
     WEAPON = "weapon"

@@ -41,9 +41,9 @@ class CharacterAgent:
 
         return best_location
 
-    def _construct_item_list(self, selection: List[ItemSelection]) -> List[Dict]:
+    def _construct_item_list(self, order: ItemOrder) -> List[Dict]:
         items = []
-        for item in selection:
+        for item in order.items:
             quantity = self._get_desired_item_quantity(item)
             if quantity == 0:
                 # Failed to meet one of the item requests
@@ -53,6 +53,28 @@ class CharacterAgent:
                 "code": item.item,
                 "quantity": quantity
             })
+
+
+        # If we only want to withdraw the needed amount, check how much we have in the inventory
+        if order.check_inv:
+            quantity_in_inv = self.get_quantity_of_item_in_inventory(item["code"])
+            quantity -= quantity_in_inv
+
+        # Withdraw multiple sets of the desired items until the inventory is full
+        if order.greedy_order:
+            # Also, check how many items are needed to be withdrawn
+            total_items_needed = 0
+            items_already_in_inv = 0
+
+            available_inv_space = self.get_free_inventory_spaces()
+
+            # Maximise the number of item sets we can withdraw
+            sets_by_inv = [available_inv_space // item["quantity"] for item in items]
+            sets_by_bank = [self.get_quantity_of_item_in_inventory(item["code"]) // item["quantity"] for item in items]
+            max_sets = min(*sets_by_inv, *sets_by_bank)
+            
+            for item in items:
+                item["quantity"] *= max_sets
 
         return items
     
@@ -65,7 +87,7 @@ class CharacterAgent:
         else:
             # Check we're not trying to take more than we have
             if available_quantity < item.quantity.min:
-                return
+                return 0
             else:
                 quantity = min(item.quantity.max, available_quantity)
             
@@ -227,47 +249,12 @@ class CharacterAgent:
                             return ActionOutcome.CANCEL
                     case _:
                         # Construct a list of items that need to be withdrawn
-                        item_selection = action.params.get("items")
-                        needed_quantity_only = action.params.get("needed_quantity_only", False)
-                        withdraw_until_inv_full = action.params.get("withdraw_until_inv_full", False)
+                        item_order = action.params.get("items")
 
-                        items_to_withdraw = self._construct_item_list(item_selection)
+                        items_to_withdraw = self._construct_item_list(item_order)
 
                         if not items_to_withdraw:
                             return ActionOutcome.FAIL
-
-                        # Withdraw multiple sets of the desired items until the inventory is full
-                        if withdraw_until_inv_full:
-                            # Also, check how many items are needed to be withdrawn
-                            total_items_needed = 0
-                            items_already_in_inv = 0
-
-                            for withdraw in items_to_withdraw:
-                                total_items_needed += int(withdraw["quantity"])
-                                items_already_in_inv += self.get_quantity_of_item_in_inventory(withdraw["code"])
-
-                            # Maximise the number of item sets we can withdraw
-                            available_inv_space = self.get_free_inventory_spaces()
-                            max_sets_to_withdraw = (available_inv_space - items_already_in_inv) // total_items_needed
-                            
-                            # Check we can actually withdraw this number of sets
-                            def get_min_sets(item: str) -> int:
-                                amt_in_bank = self.world_state.get_amount_of_item_in_bank(item["code"])
-                                return max([0, *[n for n in range(max_sets_to_withdraw, 0, -1) if amt_in_bank >= item["quantity"] * n]])
-                            
-                            sets_to_withdraw = min([get_min_sets(withdraw) for withdraw in items_to_withdraw])
-
-                            if sets_to_withdraw == 0:
-                                return ActionOutcome.CANCEL
-                            
-                            for withdraw in items_to_withdraw:
-                                withdraw["quantity"] *= sets_to_withdraw
-
-                        # If we only want to withdraw the needed amount, check how much we have in the inventory
-                        if needed_quantity_only:
-                            for item in items_to_withdraw:
-                                quantity_in_inv = self.get_quantity_of_item_in_inventory(item["code"])
-                                item["quantity"] -= quantity_in_inv
 
                 # Clean up item withdrawals
                 items_to_withdraw = [item for item in items_to_withdraw if item["quantity"] > 0]
