@@ -283,7 +283,7 @@ class ActionPlanner:
                         self.plan(ActionIntent(Intention.PREPARE_FOR_GATHERING, resource=material["item"])),
                         self.plan(ActionIntent(Intention.GATHER, resource=material["item"], until=cond(ActionCondition.INVENTORY_FULL))),
                         self.plan(ActionIntent(Intention.DEPOSIT_ITEMS, preset="all")),
-                        until=cond(ActionCondition.FOREVER)
+                        until=cond__item_qty_in_inv_and_bank(material["item"], material["quantity"])
                     )
                     for material in required_materials
                 ])
