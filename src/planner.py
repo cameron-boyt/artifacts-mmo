@@ -1,14 +1,17 @@
+from __future__ import annotations
+
 import logging
 from typing import Dict, List, Any
-from character import CharacterAction, CharacterAgent
-from action import ActionConditionExpression
-from condition_factories import *
-from control_factories import *
 from dataclasses import dataclass
-from action_factories import *
 from enum import Enum, auto
-from worldstate import WorldState
-from helpers import *
+
+from src.character import CharacterAction, CharacterAgent
+from src.action import ActionConditionExpression
+from src.condition_factories import *
+from src.control_factories import *
+from src.action_factories import *
+from src.worldstate import WorldState
+from src.helpers import *
 
 class Intention(Enum):
     MOVE = auto()

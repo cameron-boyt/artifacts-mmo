@@ -1,10 +1,14 @@
-from typing import TYPE_CHECKING, Dict, List, Tuple, Any
-from action import Action, ActionGroup, ActionCondition, ActionOutcome, CharacterAction
-from api import APIClient, APIResult, RequestOutcome, RequestOutcomeDetail
+from __future__ import annotations
+
 import logging
-from worldstate import WorldState
 import time
-from helpers import *
+from typing import TYPE_CHECKING, Dict, List, Tuple, Any
+from math import floor, ceil
+
+from src.action import Action, ActionGroup, ActionCondition, ActionOutcome, CharacterAction
+from src.api import APIClient, RequestOutcome, RequestOutcomeDetail
+from src.worldstate import WorldState
+from src.helpers import *
 
 if TYPE_CHECKING:
     from src.scheduler import ActionScheduler
@@ -30,6 +34,9 @@ class CharacterAgent:
     ## Helper Functions
     def _get_closest_location(self, locations: List[Tuple[int, int]]) -> Tuple[int, int]:
         """Get the location which is the shortest distance from the agent."""
+        if not locations:
+            return ()
+        
         shortest_distance = 9999
         best_location = (0, 0)
 
@@ -54,27 +61,41 @@ class CharacterAgent:
                 "quantity": quantity
             })
 
-
         # If we only want to withdraw the needed amount, check how much we have in the inventory
-        if order.check_inv:
-            quantity_in_inv = self.get_quantity_of_item_in_inventory(item["code"])
-            quantity -= quantity_in_inv
+        if order.check_inv and not order.greedy_order:
+            for item in items:
+                quantity_in_inv = self.get_quantity_of_item_in_inventory(item["code"])
+                item["quantity"] -= quantity_in_inv
 
         # Withdraw multiple sets of the desired items until the inventory is full
         if order.greedy_order:
-            # Also, check how many items are needed to be withdrawn
-            total_items_needed = 0
-            items_already_in_inv = 0
-
-            available_inv_space = self.get_free_inventory_spaces()
-
-            # Maximise the number of item sets we can withdraw
-            sets_by_inv = [available_inv_space // item["quantity"] for item in items]
-            sets_by_bank = [self.get_quantity_of_item_in_inventory(item["code"]) // item["quantity"] for item in items]
-            max_sets = min(*sets_by_inv, *sets_by_bank)
-            
+            per_set = {}
+            inv = {}
+            bank = {}
             for item in items:
-                item["quantity"] *= max_sets
+                i = item["code"]
+                per_set[i] = item["quantity"]
+                inv[i] = self.get_quantity_of_item_in_inventory(i)
+                bank[i] = self.world_state.get_amount_of_item_in_bank(i)
+
+            items_per_set = sum(item["quantity"] for item in items)
+            
+            if order.check_inv:
+                sets_from_inv = min(floor(inv[item["code"]] / per_set[item["code"]]) for item in items)
+            else:
+                sets_from_inv = 0
+                
+            sets_from_total = min(floor((inv[item["code"]] + bank[item["code"]]) / per_set[item["code"]]) for item in items)
+            sets_target = min(sets_from_total, floor(self.get_free_inventory_spaces() / items_per_set))
+
+            additional_sets_needed = max(0, sets_target - sets_from_inv)
+
+            need = [{"code": item["code"], "quantity": max(0, additional_sets_needed * per_set[item["code"]])} for item in items]
+
+            if order.check_inv:
+                need = [{"code": item["code"], "quantity": item["quantity"] - inv[item["code"]]} for item in need]
+
+            items = need
 
         return items
     
@@ -115,14 +136,6 @@ class CharacterAgent:
                 return item_data["quantity"]
 
         return 0
-    
-    def get_quantity_of_item_in_bank(self, item: str) -> int:
-        """Get the quantity of an item in the agent's bank."""
-        if item in self.world_state._bank_data:
-            return self.world_state._bank_data[item]
-
-        return 0
-
 
     ## Condition Checkers
     def inventory_full(self) -> bool:
@@ -149,13 +162,13 @@ class CharacterAgent:
 
     def bank_has_item_of_quantity(self, item: str, quantity: int) -> bool:
         """Check if the agent's bank has an item of at least a specific quantity."""
-        bank_quantity = self.get_quantity_of_item_in_bank(item)
+        bank_quantity = self.world_state.get_amount_of_item_in_bank(item)
         return bank_quantity >= quantity
     
     def bank_and_inventory_have_item_of_quantity(self, item: str, quantity: int) -> bool:
         """Check if the agent's bank and inventory have a combined amount of an item of at least a specific quantity."""
         inv_quantity = self.get_quantity_of_item_in_inventory(item)
-        bank_quantity = self.get_quantity_of_item_in_bank(item)
+        bank_quantity = self.world_state.get_amount_of_item_in_bank(item)
         return inv_quantity + bank_quantity >= quantity
     
 
@@ -172,7 +185,11 @@ class CharacterAgent:
                 if action.params.get("previous", False):
                     x, y = self.context.get("previous_location")
                 elif locations := action.params.get("closest_of", []):
-                    x, y = self._get_closest_location(locations)
+                    loc = self._get_closest_location(locations)
+                    if not loc:
+                        return ActionOutcome.FAIL
+                    
+                    x, y = loc
                 else:
                     x = action.params["x"]
                     y = action.params["y"]

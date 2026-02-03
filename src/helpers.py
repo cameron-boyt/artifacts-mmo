@@ -1,13 +1,15 @@
+from __future__ import annotations
+
+import math
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import List
-import math
 
 @dataclass
 class ItemOrder:
     items: List[ItemSelection]
-    greedy_order: bool
-    check_inv: bool
+    greedy_order: bool = False
+    check_inv: bool = False
 
 @dataclass
 class ItemSelection:
@@ -23,13 +25,14 @@ class ItemQuantity:
 
     def __post_init__(self):
         if self.all:
-            # If requesting all of an item, forbid a min/max selection
+            # If requesting all of an item, forbid a min/max selection and multiple_of flag
             assert(not self.max)
             assert(not self.min)
+            assert(not self.multiple_of)
 
         if not self.all:
-            # If not requesting all of an item, require a min or max selection
-            assert((self.max is not None and self.max > 0) or (self.min is not None and self.min > 0))
+            # If not requesting all of an item, require a min or max selection OR multiple of
+            assert(((self.max is not None and self.max > 0) or (self.min is not None and self.min > 0)) or self.multiple_of)
 
             # If not defined, set min to -INF and max to +INF
             if not self.max:

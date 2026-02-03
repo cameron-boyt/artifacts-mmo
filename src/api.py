@@ -1,9 +1,11 @@
-import httpx
-from typing import List, Dict
+from __future__ import annotations
+
 import logging
+import httpx
+import json
+from typing import List, Dict
 from dataclasses import dataclass
 from enum import Enum, auto
-import json
 
 class RequestOutcome(Enum):
     SUCCESS = auto()

@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Tuple
 from enum import Enum, auto
+from typing import Any, Dict, List, Tuple
 
 class CharacterAction(Enum):
     MOVE = "Move"
@@ -49,50 +51,24 @@ class ControlOperator(Enum):
 
 @dataclass
 class Action:
-    """A data object representing a command to be executed."""
+    """A command to be executed."""
     type: CharacterAction
-    params: Dict[str, Any] = None
-    until: ActionConditionExpression = None
+    params: Dict[str, Any] = field(default_factory=dict)
+    until: ActionConditionExpression | None = None
 
 @dataclass
 class ActionGroup:
     """A group or sequence of actions to be completed."""
-    actions: List[Action | ActionGroup | ActionControlNode]
+    actions: List["Action | ActionGroup | ActionControlNode"] = field(default_factory=list)
     until: ActionConditionExpression | None = None
-
-@dataclass(frozen=True)
-class ActionConditionExpression:
-    operator: LogicalOperator | None = None
-    condition: ActionCondition | None = None
-    parameters: Dict[str, Any] = field(default_factory=dict)
-    children: List["ActionConditionExpression"] = field(default_factory=list)
-
-    def __post_init__(self):
-        if self.operator:
-            # Is a logical node
-            assert(self.condition is None)
-
-            if self.operator == LogicalOperator.NOT:
-                # NOT nodes can only have one child
-                assert(self.children and len(self.children) == 1)
-            else:
-                # Other logical nodes must have at least 2 children
-                assert(self.children and len(self.children) >= 2)
-        
-        if not self.operator:
-            # Is a leaf node
-            assert(self.condition is not None)
-            assert(not self.children)
-
-    def is_leaf(self) -> bool:
-        return self.condition is not None
 
 @dataclass
 class ActionControlNode:
+    """A sequencing control node determinine action flow such as conditions or reptition."""
     control_operator: ControlOperator
     branches: List[Tuple[ActionConditionExpression, ActionGroup]] | None = None
-    fail_path: Action | ActionGroup | ActionControlNode | None = None
-    control_node: ActionControlNode | None = None
+    fail_path: "Action | ActionGroup | ActionControlNode" | None = None
+    control_node: "ActionControlNode" | None = None
     until: ActionConditionExpression | None = None
 
     def __post_init__(self):
@@ -117,3 +93,31 @@ class ActionControlNode:
             # There should be no decision branches or fail_path defined
             assert(self.branches is None)
             assert(self.fail_path is None)
+
+@dataclass(frozen=True)
+class ActionConditionExpression:
+    """A condition or set of conditions subject to logical operations."""
+    operator: LogicalOperator | None = None
+    condition: ActionCondition | None = None
+    parameters: Dict[str, Any] = field(default_factory=dict)
+    children: List["ActionConditionExpression"] = field(default_factory=list)
+
+    def __post_init__(self):
+        if self.operator:
+            # Is a logical node
+            assert(self.condition is None)
+
+            if self.operator == LogicalOperator.NOT:
+                # NOT nodes can only have one child
+                assert(self.children and len(self.children) == 1)
+            else:
+                # Other logical nodes must have at least 2 children
+                assert(self.children and len(self.children) >= 2)
+        
+        if not self.operator:
+            # Is a leaf node
+            assert(self.condition is not None)
+            assert(not self.children)
+
+    def is_leaf(self) -> bool:
+        return self.condition is not None

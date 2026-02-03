@@ -1,13 +1,19 @@
+from __future__ import annotations
+
 import asyncio
 import datetime
 import time
-from collections import deque
-from action import Action, ActionGroup, ActionCondition, ActionConditionExpression, ActionOutcome, LogicalOperator, ControlOperator, ActionControlNode
-from character import CharacterAgent
-from api import APIClient
 import logging
-from typing import Any, Dict
-from worldstate import WorldState
+from collections import deque
+from typing import TYPE_CHECKING, Any, Dict
+
+from src.action import Action, ActionGroup, ActionCondition, ActionConditionExpression, ActionOutcome, LogicalOperator, ControlOperator, ActionControlNode
+from src.character import CharacterAgent
+from src.api import APIClient
+from src.worldstate import WorldState
+
+if TYPE_CHECKING:
+    from src.character import CharacterAgent
 
 class ActionScheduler:
     """Manages action queues and worker tasks for all characters."""

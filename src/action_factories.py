@@ -1,4 +1,4 @@
-from action import Action, ActionGroup, CharacterAction, ActionConditionExpression
+from src.action import Action, ActionGroup, CharacterAction, ActionConditionExpression
 
 ## Grouping Factory
 def action_group(*actions: Action | ActionGroup, until: ActionConditionExpression | None = None) -> ActionGroup:

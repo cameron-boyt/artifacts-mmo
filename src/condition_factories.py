@@ -1,5 +1,6 @@
-from action import ActionCondition, ActionConditionExpression, LogicalOperator, ActionControlNode
 from typing import List, Tuple
+
+from src.action import ActionCondition, ActionConditionExpression, LogicalOperator, ActionControlNode
 
 # Generic Condition Factory
 def cond(condition: ActionCondition, **params) -> ActionConditionExpression:
