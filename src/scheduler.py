@@ -1,12 +1,19 @@
+from __future__ import annotations
+
 import asyncio
 import datetime
 import time
-from collections import deque
-from action import Action, ActionGroup, ActionCondition, ActionConditionExpression, LogicalOperator, ControlOperator, ActionControlNode
-from character import CharacterAgent
-from api import APIClient
 import logging
-from typing import Any, Dict
+from collections import deque
+from typing import TYPE_CHECKING, Any, Dict
+
+from src.action import Action, ActionGroup, ActionCondition, ActionConditionExpression, ActionOutcome, LogicalOperator, ControlOperator, ActionControlNode
+from src.character import CharacterAgent
+from src.api import APIClient
+from src.worldstate import WorldState
+
+if TYPE_CHECKING:
+    from src.character import CharacterAgent
 
 class ActionScheduler:
     """Manages action queues and worker tasks for all characters."""
@@ -15,7 +22,7 @@ class ActionScheduler:
 
         self.api_client = api_client
         self.agents: dict[str, CharacterAgent] = {}
-        self.queues: dict[str, deque[Action | ActionGroup]] = {}
+        self.queues: dict[str, deque[Action | ActionGroup | ActionControlNode]] = {}
         self.worker_tasks: dict[str, asyncio.Task] = {}
 
 
@@ -23,14 +30,14 @@ class ActionScheduler:
         print(self.queues)
 
 
-    def add_character(self, character_data: Dict[str, Any], bank_data: Dict[str, Any]):
+    def add_character(self, character_data: Dict[str, Any], world_state: WorldState):
         """Add a new charcter to be handled by the scheduler."""
         name = character_data["name"]
         if name in self.agents: 
             return
         
         self.logger.info(f"Adding character: {name}")
-        agent = CharacterAgent(character_data, bank_data, self.api_client, self)
+        agent = CharacterAgent(character_data, world_state, self.api_client, self)
         self.agents[name] = agent
         self.queues[name] = deque()
         task = asyncio.create_task(self._worker(name))
@@ -93,6 +100,9 @@ class ActionScheduler:
 
     async def _process_single_action(self, agent: CharacterAgent, action: Action) -> bool:
         """Process a single action to be made by an agent, repeating as defined."""
+        retry_count = 0
+        retry_max = 3
+
         while True:
             # Wait for the remaining cooldown for the worker
             remaining_cooldown = max(0, agent.cooldown_expires_at - time.time())
@@ -101,38 +111,48 @@ class ActionScheduler:
                 await asyncio.sleep(remaining_cooldown)
                                     
             # Execute the action
-            result = await agent.perform(action)
+            outcome = await agent.perform(action)
 
-            # Action failed if cooldown is negative
-            if not result.success:
-                self.logger.warning(f"[{agent.name}] Action {action.type} failed.")
-
-                if result.cascade:
+            # Check action result
+            match outcome:
+                case ActionOutcome.SUCCESS:
+                    # Check if the repeat until condition has been met for this action
+                    if self._evaluate_condition(agent, action.until):
+                        return True
+                
+                case ActionOutcome.FAIL:
+                    self.logger.error(f"[{agent.name}] Action {action.type} failed.")
                     return False
-                else:
-                    # No need to update cooldown since the action failed, we can safely continue the action sequence
-                    self.logger.warning(f"[{agent.name}] Continuing action chain anyway...")
+                
+                case ActionOutcome.FAIL_RETRY:
+                    retry_count += 1
+                    if retry_count >= retry_max:
+                        self.logger.error(f"[{agent.name}] Action {action.type} failed.")
+                        return False
+                    else:
+                        self.logger.warning(f"[{agent.name}] Action {action.type} failed, but will be retried.")
+                        await asyncio.sleep(1)
+                        continue
+
+                case ActionOutcome.FAIL_CONTINUE:
+                    # The action failed, but we can safely continue the action sequence
+                    self.logger.warning(f"[{agent.name}] Action {action.type} failed, but continuing action sequence anyway...")
                     return True
-
-            # Update the agent's cooldown
-            new_cooldown = result.response.get("data").get("cooldown").get("remaining_seconds")
-            agent.cooldown_expires_at = time.time() + new_cooldown
-
-            # Check if the repeat until condition has been met for this action
-            if self._evaluate_condition(agent, action.until):
-                break
-
-        return True
+                
+                case ActionOutcome.CANCEL:
+                    # A cancelled action can be treated as a success with no state updates
+                    self.logger.debug(f"[{agent.name}] Action {action.type} was cancelled.")
+                    return True
 
     async def _process_action_group(self, agent: CharacterAgent, action_group: ActionGroup) -> bool:
         """Process an action group, sequencing through all child actions, repeating as defined."""
         while True:
             # Traverse through the grouped actions and execute them in sequence
             for sub_action in action_group.actions:
-                sub_action_succesful = await self._process_node(agent, sub_action)
+                sub_action_successful = await self._process_node(agent, sub_action)
 
                 # If a sub_action was unsuccessful, discard the rest of the group
-                if not sub_action_succesful:
+                if not sub_action_successful:
                     return False
                 
             # Check if the repeat until condition has been met for this action
@@ -146,7 +166,11 @@ class ActionScheduler:
         match control_node.control_operator:
             case ControlOperator.IF:
                 branch = self._evaluate_control_branches(agent, control_node)
-                return await self._process_node(agent, branch)
+                if branch:
+                    return await self._process_node(agent, branch)
+                else:
+                    # No fail_path branch, therefore continue following the action sequence
+                    return True
             
             case ControlOperator.REPEAT:
                 while True:
@@ -185,22 +209,49 @@ class ActionScheduler:
                     condition_met = False
                 
                 case ActionCondition.INVENTORY_FULL:
-                    condition_met = agent.is_inventory_full()
+                    condition_met = agent.inventory_full()
+                
+                case ActionCondition.INVENTORY_EMPTY:
+                    condition_met = agent.inventory_empty()
+
+                case ActionCondition.INVENTORY_HAS_AVAILABLE_SPACE:
+                    free_spaces = expression.parameters["spaces"]
+                    condition_met = agent.inventory_has_available_space(free_spaces)
+
+                case ActionCondition.INVENTORY_HAS_AVAILABLE_SPACE_FOR_ITEMS:
+                    items = expression.parameters["items"]
+                    needed_space = 0
+                    for item in items:
+                        needed_quantity = item["quantity"]
+                        current_quantity = agent.get_quantity_of_item_in_inventory(item["item"])
+                        needed_space += needed_quantity - current_quantity
+
+                    condition_met = agent.inventory_has_available_space(needed_space)
+                
+                case ActionCondition.INVENTORY_HAS_ITEM_OF_QUANTITY:
+                    item = expression.parameters["item"]
+                    quantity = expression.parameters["quantity"]
+                    condition_met = agent.inventory_has_item_of_quantity(item, quantity)
                 
                 case ActionCondition.BANK_HAS_ITEM_OF_QUANTITY:
-                    item_code = expression.parameters.get("item_code", "")
-                    quantity = expression.parameters.get("quantity", 0)
-                    condition_met = agent.bank_has_item_of_quantity(item_code, quantity)
+                    item = expression.parameters["item"]
+                    quantity = expression.parameters["quantity"]
+                    condition_met = agent.bank_has_item_of_quantity(item, quantity)
+
+                case ActionCondition.BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY:
+                    item = expression.parameters["item"]
+                    quantity = expression.parameters["quantity"]
+                    condition_met = agent.bank_and_inventory_have_item_of_quantity(item, quantity)
 
                 case _:
                     raise NotImplementedError()
                 
             if condition_met:
-                self.logger.debug(f"[{agent.name}] Successfully met condition.")
+                self.logger.debug(f"[{agent.name}] Passed {expression.condition} with parameters {expression.parameters}.")
             else:
                 # Exception case where a 'failure' is due to a FOREVER condition
                 if expression.condition != ActionCondition.FOREVER:
-                    self.logger.debug(f"[{agent.name}] Failed to meet condition.")
+                    self.logger.debug(f"[{agent.name}] Failed {expression.condition} with parameters {expression.parameters}.")
 
             return condition_met
         else:

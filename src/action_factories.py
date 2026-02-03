@@ -1,8 +1,11 @@
-from action import Action, ActionGroup, CharacterAction, ActionConditionExpression
+from src.action import Action, ActionGroup, CharacterAction, ActionConditionExpression
 
 ## Grouping Factory
 def action_group(*actions: Action | ActionGroup, until: ActionConditionExpression | None = None) -> ActionGroup:
     return ActionGroup(actions=actions, until=until)
+
+def do_nothing() -> ActionGroup:
+    return action_group()
 
 ## Base Action Factories
 
@@ -46,7 +49,7 @@ def bank_withdraw_item(**params) -> Action:
 
 def bank_all_items() -> Action:
     return Action(CharacterAction.BANK_DEPOSIT_ITEM, params={"preset": "all"})
-
+                                                             
 def bank_deposit_gold(**params) -> Action:
     return Action(CharacterAction.BANK_DEPOSIT_GOLD, params=params)
 

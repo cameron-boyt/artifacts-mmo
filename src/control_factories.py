@@ -1,5 +1,6 @@
-from action import Action, ActionGroup, ActionConditionExpression, ActionControlNode, ControlOperator
 from typing import Tuple
+
+from src.action import Action, ActionGroup, ActionConditionExpression, ActionControlNode, ControlOperator
 
 def IF(*branches: Tuple[ActionConditionExpression, ActionGroup], fail_path: Action | ActionGroup) -> ActionControlNode:
     return ActionControlNode(

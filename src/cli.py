@@ -1,17 +1,19 @@
 import asyncio
-from action import *
-from action_factories import *
-from condition_factories import *
-from control_factories import *
-from api import APIClient
-from scheduler import ActionScheduler
-from planner import ActionPlanner, ActionIntent, Intention, ItemQuantity, ItemSelection, intent_group
 import logging
 import json
+import re
 
+from src.action import *
+from src.action_factories import *
+from src.condition_factories import *
+from src.control_factories import *
+from src.api import APIClient
+from src.scheduler import ActionScheduler
+from src.planner import ActionPlanner, ActionIntent, Intention
+from src.worldstate import WorldState
 
 def get_token() -> str:
-    with open("C:/Users/Cameron/Desktop/Artifacts/token.txt", 'r') as f:
+    with open("token.txt", 'r') as f:
         TOKEN = f.read().strip()
 
     return TOKEN
@@ -22,7 +24,7 @@ async def get_bank_data(api: APIClient, query_api: bool = False) -> List[Dict[st
     all_bank_data: List[Dict[str, Any]] = bank_data.get("data")
 
     for i in range(2, bank_data.get("pages", 1)):
-        bank_data = await api.get_maps(i)
+        bank_data = await api.get_bank(i)
         all_bank_data.extend(bank_data.get("data"))
 
     with open('bank_data.json', 'w') as f:
@@ -46,13 +48,7 @@ async def get_item_data(api: APIClient, query_api: bool = False) -> Dict[str, Di
         with open('item_data.json', 'r') as f:
             all_item_data = json.loads(f.read())
 
-    # Parse it
-    items = {}
-    for item in all_item_data:
-        item_code = item["code"]
-        items[item_code] = item
-
-    return items 
+    return all_item_data
 
 async def get_map_data(api: APIClient, query_api: bool = False) -> Dict[str, Dict]:
     if query_api:
@@ -70,27 +66,7 @@ async def get_map_data(api: APIClient, query_api: bool = False) -> Dict[str, Dic
         with open('map_data.json', 'r') as f:
             all_map_data = json.loads(f.read())
 
-    # Parse it
-    interactions: Dict[str, Dict] = {
-        "resource": {},
-        "monster": {},
-        "workshop": {},
-        "bank": {},
-        "grand_exchange": {},
-        "tasks_master": {},
-        "npc": {},
-    }
-
-    for map_tile in all_map_data:
-        content_data = map_tile.get("interactions", {}).get("content", None)
-
-        if content_data:
-            content_type = content_data["type"]
-            content_code = content_data["code"]
-            x, y = map_tile["x"], map_tile["y"]
-            interactions[content_type].setdefault(content_code, []).append((x, y))
-
-    return interactions 
+    return all_map_data
 
 async def get_resource_data(api: APIClient, query_api: bool = False) -> Dict[str, Dict]:
     if query_api:
@@ -108,13 +84,7 @@ async def get_resource_data(api: APIClient, query_api: bool = False) -> Dict[str
         with open('resource_data.json', 'r') as f:
             all_resource_data = json.loads(f.read())
 
-    # Parse it
-    resource_sources = {}
-    for resource in all_resource_data:
-        for drop in resource["drops"]:
-            resource_sources.setdefault(drop["code"], set()).add(resource["code"])
-
-    return resource_sources 
+    return all_resource_data
 
 async def get_monster_data(api: APIClient, query_api: bool = False) -> Dict[str, Dict]:
     if query_api:
@@ -132,13 +102,7 @@ async def get_monster_data(api: APIClient, query_api: bool = False) -> Dict[str,
         with open('monster_data.json', 'r') as f:
             all_monster_data = json.loads(f.read())
 
-    # Parse it
-    monster_sources = {}
-    for monster in all_monster_data:
-        for drop in monster["drops"]:
-            monster_sources.setdefault(drop["code"], set()).add(monster["code"])
-
-    return monster_sources 
+    return all_monster_data
 
 async def main():
     logging.basicConfig(
@@ -162,33 +126,40 @@ async def main():
     GET_API_DATA = False
     bank_data = await get_bank_data(api, GET_API_DATA)
     item_data = await get_item_data(api, GET_API_DATA)
-    interactions = await get_map_data(api, GET_API_DATA)
-    resource_drop_data = await get_resource_data(api, GET_API_DATA)
-    monster_drop_data = await get_monster_data(api, GET_API_DATA)
+    map_data = await get_map_data(api, GET_API_DATA)
+    resource_data = await get_resource_data(api, GET_API_DATA)
+    monster_data = await get_monster_data(api, GET_API_DATA)
 
-    world_data = {
-        'interactions': interactions,
-        'items': item_data,
-        'resources': resource_drop_data,
-        'monsters': monster_drop_data
-    }
+    world_state = WorldState(bank_data, map_data, item_data, resource_data, monster_data)
 
     scheduler = ActionScheduler(api)
-    planner = ActionPlanner(world_data)
+    planner = ActionPlanner(world_state)
 
     characters = await api.get_characters()
     for character in characters["data"]:
-        scheduler.add_character(character, bank_data)
+        scheduler.add_character(character, world_state)
+
+    # Run some starting commands
+    parse_input(planner, scheduler, world_state, "Cameron craft-or-gather ash_plank max")
+    parse_input(planner, scheduler, world_state, "Maett craft-or-gather copper_bar max")
+    parse_input(planner, scheduler, world_state, "Oscar craft-or-gather cooked_gudgeon max")
+    parse_input(planner, scheduler, world_state, "Jayne gather-forever sunflower")
+    parse_input(planner, scheduler, world_state, "Moira gather-forever sunflower")
 
     while True:
         c = await asyncio.to_thread(input, "Enter Command: ")
-        parse_input(planner, scheduler, c, world_data)
+        parse_input(planner, scheduler, world_state, c)
     
 
-def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str, interactions: Dict):
+def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: WorldState, c: str):
     data = c.split() 
-    character_name = data[0].title().strip()
-    action_kw = data[1].lower().strip()
+
+    try:
+        character_name = data[0].title().strip()
+        action_kw = data[1].lower().strip()
+    except:
+        print("bad input")
+        return
 
     agent = scheduler.agents[character_name]
 
@@ -203,100 +174,207 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, c: str, inte
             
         case 'move':
             if len(args) == 1 and args[0] == "prev":
-                node = planner.plan(agent, Intention.MOVE, prev_location=True)
-            else:
-                node = planner.plan(agent, Intention.MOVE)
+                node = planner.plan(ActionIntent(Intention.MOVE, previous=True))
+            elif len(args) == 2:
+                node = planner.plan(ActionIntent(Intention.MOVE, x=args[0], y=args[1]))
+            else: 
+                return
 
             scheduler.queue_action_node(character_name, node)
 
         case 'fight':
             if len(args) == 1:
-                node = planner.plan(agent, ActionIntent(Intention.FIGHT, monster=args[0]))
+                if world.is_a_monster(args[0]):
+                    node = planner.plan(ActionIntent(Intention.FIGHT, monster=args[0]))
+                else:
+                    print("not a monster")
             else:
-                node = planner.plan(agent, ActionIntent(Intention.FIGHT))
+                node = planner.plan(ActionIntent(Intention.FIGHT))
             
             scheduler.queue_action_node(character_name, node)
 
         case 'rest':
-            node = planner.plan(agent, Intention.REST)
+            node = planner.plan(ActionIntent(Intention.REST))
             scheduler.queue_action_node(character_name, node)
 
         case 'gather':
             if len(args) == 1:
-                node = planner.plan(agent, ActionIntent(Intention.GATHER, resource=args[0]))
+                if world.is_a_resource(args[0]):
+                    node = planner.plan(ActionIntent(Intention.GATHER, resource=args[0]))
+                else:
+                    print("not a resource")
             else:
-                node = planner.plan(agent, ActionIntent(Intention.GATHER))
+                node = planner.plan(ActionIntent(Intention.GATHER))
             
             scheduler.queue_action_node(character_name, node)
 
         case 'equip':
             if len(args) == 2:
-                node = planner.plan(agent, Intention.EQUIP, items=args[0], slot=args[1])
-                scheduler.queue_action_node(character_name, node)
+                if world.is_an_item(args[0]):
+                    node = planner.plan(ActionIntent(Intention.EQUIP, items=args[0], slot=args[1]))
+                else:
+                    print("not an item")
+            else:
+                return
+            
+            scheduler.queue_action_node(character_name, node)
 
         case 'unequip':
             if len(args) == 1:
-                node = planner.plan(agent, Intention.UNEQUIP, slot=args[1])
-                scheduler.queue_action_node(character_name, node)
+                node = planner.plan(ActionIntent(Intention.UNEQUIP, slot=args[0]))
+            else:
+                return
+            
+            scheduler.queue_action_node(character_name, node)
 
         case 'craft':
+            if not world.is_an_item(args[0]):
+                print("not an item")
+                return
+            
+            if not world.item_is_craftable(args[0]):
+                print("item not craftable")
+                return
+            
             if len(args) == 2:
-                node = planner.plan(agent, Intention.CRAFT, item=args[0], quantity=args[1])
-                scheduler.queue_action_node(character_name, node)
+                if args[1] == "max":
+                    node = planner.plan(ActionIntent(Intention.CRAFT, item=args[0], as_many_as_possible=True))
+                else:
+                    node = planner.plan(ActionIntent(Intention.CRAFT, item=args[0], quantity=args[1]))
             elif len(args) == 1:
-                node = planner.plan(agent, Intention.CRAFT, item=args[0], quantity=1)
-                scheduler.queue_action_node(character_name, node)
+                node = planner.plan(ActionIntent(Intention.CRAFT, item=args[0], quantity=1))
+            else:
+                return
+            
+            scheduler.queue_action_node(character_name, node)
 
         case 'bank':
             if args[0] == 'deposit' and args[1] == 'gold':
-                params_dict = { "quantity": args[2] }
-                action = Action(CharacterAction.BANK_DEPOSIT_GOLD, params_dict)
+                node = planner.plan(ActionIntent(Intention.DEPOSIT_GOLD, quantity=int(args[2])))
             elif args[0] == 'withdraw' and args[1] == 'gold':
-                params_dict = { "quantity": args[2] }
-                action = Action(CharacterAction.BANK_WITHDRAW_GOLD, params_dict)
+                node = planner.plan(ActionIntent(Intention.WITHDRAW_GOLD, quantity=int(args[2])))
             elif args[0] == 'deposit' and args[1] == 'item':
                 if args[2] == "all":
-                    params_dict = { "preset": "all"  }
+                    node = planner.plan(ActionIntent(Intention.DEPOSIT_ITEMS, preset="all"))
                 else:
-                    params_dict = { "items": [] }
+                    items = [] 
                     for i in range(2, len(args), 2):
-                        params_dict["items"].append({ "code": args[i], "quantity": args[i + 1] })
+                       items.append({ "code": args[i], "quantity": args[i + 1] })
 
-                action = Action(CharacterAction.BANK_DEPOSIT_ITEM, params_dict)
+                    node = planner.plan(ActionIntent(Intention.DEPOSIT_ITEMS, items=items))
             elif args[0] == 'withdraw' and args[1] == 'item':
-                params_dict = { "items": [] }
+                items = [] 
                 for i in range(2, len(args), 2):
-                    params_dict["items"].append({ "code": args[i], "quantity": args[i + 1] })
+                    items.append({ "code": args[i], "quantity": args[i + 1] })
 
-                action = Action(CharacterAction.BANK_WITHDRAW_ITEM, params_dict)
+                node = planner.plan(ActionIntent(Intention.WITHDRAW_ITEMS, items=items))
             
-            scheduler.queue_action_node(character_name, action)
+            scheduler.queue_action_node(character_name, node)
 
         # create combo actions
-        case 'gather_endless':
-            node = action_group(
-                planner.plan(agent, ActionIntent(Intention.GATHER, until=cond(ActionCondition.INVENTORY_FULL))),
-                planner.plan(agent, ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
-                until=cond(ActionCondition.FOREVER)
+        case 'gather-forever':
+            if len(args) == 1:
+                if not world.is_a_resource(args[0]): 
+                    print("not a resource")
+                    return
+                
+                node = action_group(
+                    planner.plan(ActionIntent(Intention.PREPARE_FOR_GATHERING, resource=args[0])),
+                    action_group(
+                        planner.plan(ActionIntent(Intention.GATHER, resource=args[0], until=cond(ActionCondition.INVENTORY_FULL))),
+                        planner.plan(ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
+                        until=cond(ActionCondition.FOREVER)
+                    )
+                )
+            else:
+                node = action_group(
+                    action_group(
+                        planner.plan(ActionIntent(Intention.GATHER, until=cond(ActionCondition.INVENTORY_FULL))),
+                        planner.plan(ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
+                        until=cond(ActionCondition.FOREVER)
+                    )
+                )
+
+            scheduler.queue_action_node(character_name, node)
+
+        case 'fight-forever':
+            if len(args) == 1:
+                if not world.is_a_monster(args[0]): 
+                    print("not a monster")
+                    return
+                
+                move_prev = False
+                fight_plan = planner.plan(ActionIntent(Intention.FIGHT_THEN_REST, monster=args[0], until=cond(ActionCondition.INVENTORY_FULL)))
+            else:
+                move_prev = True
+                fight_plan = planner.plan(ActionIntent(Intention.FIGHT_THEN_REST, until=cond(ActionCondition.INVENTORY_FULL)))
+
+            node = action_group(                
+                planner.plan(ActionIntent(Intention.PREPARE_FOR_FIGHTING, move_prev=move_prev)),
+                action_group(
+                    fight_plan,
+                    planner.plan(ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
+                    until=cond(ActionCondition.FOREVER)
+                )
             )
             scheduler.queue_action_node(character_name, node)
 
-        case 'fight_endless':
-            node = action_group(
-                planner.plan(agent, ActionIntent(Intention.FIGHT_THEN_REST, monster="chicken", until=cond(ActionCondition.INVENTORY_FULL))),
-                planner.plan(agent, ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
-                until=cond(ActionCondition.FOREVER)
-            )
+        case 'smart-craft':
+            if len(args) == 0 or len(args) > 2:
+                return 
+            
+            if len(args) > 0:
+                if not world.is_an_item(args[0]):
+                    print("not an item")
+                    return
+                
+                if not world.item_is_craftable(args[0]):
+                    print("item not craftable")
+                    return
+                
+                item = args[0]
+                quantity = '1'
+            
+            if len(args) == 2:
+                quantity = args[1]
+          
+            if re.match(r'\d+', quantity):
+                quantity = int(quantity)
+                node = planner.plan(ActionIntent(Intention.COLLECT_THEN_CRAFT, item=item, quantity=quantity))
+            elif re.match(r'max', quantity):
+                node = planner.plan(ActionIntent(Intention.COLLECT_THEN_CRAFT, item=item, as_many_as_possible=True))
+            else:
+                raise Exception("Invalid quantity argument.")
+            
             scheduler.queue_action_node(character_name, node)
 
-        # tests
-        case 'test':
-            node = REPEAT(                  
-                planner.plan(agent, ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item="copper_bar", quantity=1)),
-                until=cond(ActionCondition.FOREVER)
-            )
+        case 'craft-or-gather':
+            if len(args) == 2:
+                if not world.is_an_item(args[0]):
+                    print("not an item")
+                    return
+                
+                if not world.item_is_craftable(args[0]):
+                    print("item not craftable")
+                    return
+                
+                item = args[0]
 
-            scheduler.queue_action_node(character_name, node)
+                if re.match(r'\d+', args[1]):
+                    quantity = int(args[1])
+                    node = action_group(
+                        planner.plan(ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=item, quantity=quantity)),
+                        until=cond(ActionCondition.FOREVER)
+                    )
+                elif re.match(r'max', args[1]):
+                    node = action_group(
+                        planner.plan(ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=item, as_many_as_possible=True)),
+                        until=cond(ActionCondition.FOREVER)
+                    )
+                else:
+                    raise Exception("Invalid quantity argument.")
+                
+                scheduler.queue_action_node(character_name, node)
 
 if __name__ == '__main__':
     asyncio.run(main())

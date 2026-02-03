@@ -1,16 +1,32 @@
-import httpx
-from typing import List, Dict
+from __future__ import annotations
+
 import logging
+import httpx
+import json
+from typing import List, Dict
 from dataclasses import dataclass
+from enum import Enum, auto
+
+class RequestOutcome(Enum):
+    SUCCESS = auto()
+    FAIL = auto()
+
+class RequestOutcomeDetail(Enum):
+    OK = auto()
+    NOT_FOUND = auto()
+    INVALID_PAYLOAD = auto()
+    MISSING_REQUIRED_ITEMS = auto()
+    ALREADY_AT_DESTINATION = auto()
+    LEVEL_TOO_LOW = auto()
+    INVENTORY_FULL = auto()
+    ON_COOLDOWN = auto()
+    NO_INTERACTION = auto()
 
 @dataclass 
-class ActionResult:
+class APIResult:
     response: dict
-    """Data response from the action request."""
-    success: bool
-    """If the action was successful."""
-    cascade: bool = False
-    """If the result of failure should cascade through the action and cancel all remaining items in the queue."""
+    outcome: RequestOutcome
+    detail: RequestOutcomeDetail
 
 class APIClient:
     """Handles all HTTP communication with the remote server."""
@@ -59,93 +75,114 @@ class APIClient:
         return response.json()
 
     ## API General Requests
-    async def move(self, character_name: str, x: int, y: int) -> ActionResult:
+    async def move(self, character_name: str, x: int, y: int) -> APIResult:
         payload = { "x": x, "y": y }
         response = await self._client.post(f"/my/{character_name}/action/move", json=payload)
         return await self.handle_status(response)
 
-    async def fight(self, character_name: str) -> ActionResult:
+    async def fight(self, character_name: str) -> APIResult:
         response = await self._client.post(f"/my/{character_name}/action/fight")
         return await self.handle_status(response)
 
-    async def rest(self, character_name: str) -> ActionResult:
+    async def rest(self, character_name: str) -> APIResult:
         response = await self._client.post(f"/my/{character_name}/action/rest")
         return await self.handle_status(response)
 
-    async def gather(self, character_name: str) -> ActionResult:
+    async def gather(self, character_name: str) -> APIResult:
         response = await self._client.post(f"/my/{character_name}/action/gathering")
         return await self.handle_status(response)
 
-    async def bank_deposit_item(self, character_name: str, items: List[Dict[str, str | int]]) -> ActionResult:
+    async def bank_deposit_item(self, character_name: str, items: List[Dict[str, str | int]]) -> APIResult:
         response = await self._client.post(f"/my/{character_name}/action/bank/deposit/item", json=items)
         return await self.handle_status(response)
 
-    async def bank_withdraw_item(self, character_name: str, items: List[Dict[str, str | int]]) -> ActionResult:
+    async def bank_withdraw_item(self, character_name: str, items: List[Dict[str, str | int]]) -> APIResult:
         response = await self._client.post(f"/my/{character_name}/action/bank/withdraw/item", json=items)
         return await self.handle_status(response)
 
-    async def bank_deposit_gold(self, character_name: str, quantity: int) -> ActionResult:
+    async def bank_deposit_gold(self, character_name: str, quantity: int) -> APIResult:
         response = await self._client.post(f"/my/{character_name}/action/bank/deposit/gold", json=quantity)
         return await self.handle_status(response)
 
-    async def bank_withdraw_gold(self, character_name: str, quantity: int) -> ActionResult:
+    async def bank_withdraw_gold(self, character_name: str, quantity: int) -> APIResult:
         response = await self._client.post(f"/my/{character_name}/action/bank/withdraw/gold", json=quantity)
         return await self.handle_status(response)
 
-    async def unequip(self, character_name: str, item_slot: str) -> ActionResult:
+    async def unequip(self, character_name: str, item_slot: str) -> APIResult:
         payload = { "slot": item_slot }
         response = await self._client.post(f"/my/{character_name}/action/unequip", json=payload)
         return await self.handle_status(response)
 
-    async def craft(self, character_name: str, item_slot: str) -> ActionResult:
-        payload = { "code": item_slot }
+    async def craft(self, character_name: str, item_code: str, quantity: int = 1) -> APIResult:
+        payload = { "code": item_code, "quantity": quantity }
         response = await self._client.post(f"/my/{character_name}/action/crafting", json=payload)
         return await self.handle_status(response)
 
-    async def equip(self, character_name: str, item_code: str, item_slot: str, ) -> ActionResult:
+    async def equip(self, character_name: str, item_code: str, item_slot: str, ) -> APIResult:
         payload = { "code": item_code, "slot": item_slot }
         response = await self._client.post(f"/my/{character_name}/action/equip", json=payload)
         return await self.handle_status(response)
     
-    async def handle_status(self, response: httpx.Response) -> ActionResult:
-        data = response.json()
-        cascade = True
+    async def handle_status(self, response: httpx.Response) -> APIResult:
+        try:
+            data = response.json()
+        except:
+            data = {"raw": response.text}
+    
 
         match response.status_code:
             case 200:
                 # All good
-                success = True
-            
-            case 422:
-                # Invalid payload
-                success = False
+                outcome = RequestOutcome.SUCCESS
+                detail = RequestOutcomeDetail.OK
             
             case 404:
                 # Not found
-                success = False
+                outcome = RequestOutcome.FAIL
+                detail = RequestOutcomeDetail.NOT_FOUND
+            
+            case 422:
+                # Invalid payload
+                outcome = RequestOutcome.FAIL
+                detail = RequestOutcomeDetail.INVALID_PAYLOAD
+            
+            case 478:
+                # Missing required items
+                self.logger.error("Character missing required items for action.")
+                outcome = RequestOutcome.FAIL
+                detail = RequestOutcomeDetail.MISSING_REQUIRED_ITEMS
 
             case 490:
                 # Character already at destination
-                self.logger.warning("Character already at destination")
-                success = False
-                cascade = False
+                self.logger.warning("Character already at destination.")
+                outcome = RequestOutcome.FAIL
+                detail = RequestOutcomeDetail.ALREADY_AT_DESTINATION
+
+            case 493:
+                # Character level too low
+                self.logger.warning("Character level too low.")
+                outcome = RequestOutcome.FAIL
+                detail = RequestOutcomeDetail.LEVEL_TOO_LOW
 
             case 497:
                 # Character inventory is full
-                self.logger.warning("Character inventory is full")
-                success = False
+                self.logger.warning("Character inventory is full.")
+                outcome = RequestOutcome.FAIL
+                detail = RequestOutcomeDetail.INVENTORY_FULL
 
             case 499:
                 # Character on cooldown
-                self.logger.warning("Character is on cooldown")
-                success = False
+                self.logger.warning("Character is on cooldown.")
+                outcome = RequestOutcome.FAIL
+                detail = RequestOutcomeDetail.ON_COOLDOWN
 
             case 598:
                 # No resource/monster on map
-                self.logger.warning("No resource/monster on map")
-                success = False
+                self.logger.warning("No resource/monster on map.")
+                outcome = RequestOutcome.FAIL
+                detail = RequestOutcomeDetail.NO_INTERACTION
 
             case _:
-                raise Exception("fuck")
+                raise Exception(f"oh no; saw {response.status_code}")
             
-        return ActionResult(data, success, cascade)
+        return APIResult(data, outcome, detail)
