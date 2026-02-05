@@ -382,99 +382,99 @@ def test__get_quantity_of_item_in__inventory_inv_full__has_item(agent: Character
 ## Condition Checkers
 #inventory_full
 def test__inventory_full__no_items(agent: CharacterAgent):
-    assert agent.inventory_full() == False
+    assert not agent.inventory_full()
 
 def test__inventory_full__no_items__zero_max_inv_space(agent: CharacterAgent):
     agent.char_data["inventory_max_items"] = 0
-    assert agent.inventory_full() == True
+    assert agent.inventory_full()
 
 def test__inventory_full__partial_fill(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.inventory_full() == False
+    assert not agent.inventory_full()
 
 def test__inventory_full__completed_filled(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 5, "iron_ore": 15, "ash_wood": 80})
-    assert agent.inventory_full() == True
+    assert agent.inventory_full()
 
 #inventory_empty
 def test__inventory_empty__no_items(agent: CharacterAgent):
-    assert agent.inventory_empty() == True
+    assert agent.inventory_empty()
 
 def test__inventory_empty__partial_fill(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.inventory_empty() == False
+    assert not agent.inventory_empty()
 
 def test__inventory_empty__no_items__no_max_space(agent: CharacterAgent):
     agent.char_data["inventory_max_items"] = 0
-    assert agent.inventory_full() == True
+    assert agent.inventory_full()
 
 #inventory_has_available_space
 def test__inventory_has_available_space__empty_inv__low_request(agent: CharacterAgent):
-    assert agent.inventory_has_available_space(10) == True
+    assert agent.inventory_has_available_space(10)
 
 def test__inventory_has_available_space__empty_inv__request_above_inv_capacity(agent: CharacterAgent):
-    assert agent.inventory_has_available_space(110) == False
+    assert not agent.inventory_has_available_space(110)
 
 def test__inventory_has_available_space__partially_filled_inv__low_request(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.inventory_has_available_space(10) == True
+    assert agent.inventory_has_available_space(10)
 
 def test__inventory_has_available_space__partially_filled_inv__high_request(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.inventory_has_available_space(90) == False
+    assert not agent.inventory_has_available_space(90)
 
 #inventory_has_item_of_quantity
 def test__inventory_has_item_of_quantity__empty_inv(agent: CharacterAgent):
-    assert agent.inventory_has_item_of_quantity("copper_ore", 10) == False
+    assert not agent.inventory_has_item_of_quantity("copper_ore", 10)
 
 def test__inventory_has_item_of_quantity__partially_filled_inv__no_item(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.inventory_has_item_of_quantity("ash_wood", 5) == False
+    assert not agent.inventory_has_item_of_quantity("ash_wood", 5)
 
 def test__inventory_has_item_of_quantity__has_item__exact_quantity(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.inventory_has_item_of_quantity("copper_ore", 5) == True
+    assert agent.inventory_has_item_of_quantity("copper_ore", 5)
 
 def test__inventory_has_item_of_quantity__has_item__low_quantity(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.inventory_has_item_of_quantity("copper_ore", 3) == True
+    assert agent.inventory_has_item_of_quantity("copper_ore", 3)
 
 def test__inventory_has_item_of_quantity__has_item__too_high_quantity(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.inventory_has_item_of_quantity("copper_ore", 10) == False
+    assert not agent.inventory_has_item_of_quantity("copper_ore", 10)
 
 #bank_has_item_of_quantity
 def test__bank_has_item_of_quantity__bank_has_sufficent(agent: CharacterAgent):
-    assert agent.bank_has_item_of_quantity("copper_ore", 5) == True
+    assert agent.bank_has_item_of_quantity("copper_ore", 5)
 
 def test__bank_has_item_of_quantity__bank_has_exact(agent: CharacterAgent):
-    assert agent.bank_has_item_of_quantity("copper_ore", 15) == True
+    assert agent.bank_has_item_of_quantity("copper_ore", 15)
 
 def test__bank_has_item_of_quantity__bank_has_insufficent(agent: CharacterAgent):
-    assert agent.bank_has_item_of_quantity("copper_ore", 25) == False
+    assert not agent.bank_has_item_of_quantity("copper_ore", 25)
 
 #bank_and_inventory_have_item_of_quantity
 def test__bank_and_inventory_have_item_of_quantity__both_sufficient(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 20})
-    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 10) == True
+    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 10)
 
 def test__bank_and_inventory_have_item_of_quantity__bank_insufficient__inv_sufficient(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 20})
-    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 18) == True
+    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 18)
 
 def test__bank_and_inventory_have_item_of_quantity__bank_sufficient__inv_insufficient(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 10})
-    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 12) == True
+    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 12)
 
 
 def test__bank_and_inventory_have_item_of_quantity__both_insufficient__total_sufficient(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 5})
-    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 18) == True
+    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 18)
 
 def test__bank_and_inventory_have_item_of_quantity__both_insufficient__total_exact(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 5})
-    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 20) == True
+    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 20)
 
 def test__bank_and_inventory_have_item_of_quantity__both_insufficient__total_insufficient(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 5})
-    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 25) == False
+    assert not agent.bank_and_inventory_have_item_of_quantity("copper_ore", 25)

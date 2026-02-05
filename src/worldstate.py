@@ -28,10 +28,11 @@ class WorldState:
         self._map_data = map_data
         self._item_data: Dict[str, Dict] = {i["code"]: i for i in item_data}
         self._resource_data = resource_data
-        self._monster_data = monster_data
+        self._monster_data = {m["code"]: m for m in monster_data}
 
         self._interactions: WorldInteractions = None
-        self._resource_sources = {}
+        self._resource_to_tile = {}
+        self._tile_to_resource = {}
         self._drop_sources = {}
 
         self.bank_reservations = {}
@@ -40,9 +41,10 @@ class WorldState:
 
     def __post_init__(self):
         self._interactions = self._generate_interations()
-        self._resource_sources = self._generate_resource_sources()
+        self._resource_to_tile, self._tile_to_resource = self._generate_resource_sources()
         self._drop_sources = self._generate_monster_drop_sources()
 
+    ## Post-Init Generation
     def _generate_interations(self):
         interactions = {}
 
@@ -66,120 +68,66 @@ class WorldState:
         ) 
     
     def _generate_resource_sources(self):
-        resource_sources = {}
+        resource_to_tile = {}
+        tile_to_resource = {}
         for resource in self._resource_data:
             for drop in resource["drops"]:
-                resource_sources.setdefault(drop["code"], set()).add(resource["code"])
+                resource_to_tile.setdefault(drop["code"], set()).add(resource["code"])
+                tile_to_resource.setdefault(resource["code"], set()).add(drop["code"])
 
-        return resource_sources 
+        return resource_to_tile, tile_to_resource
     
     def _generate_monster_drop_sources(self):
         monster_sources = {}
-        for monster in self._monster_data:
-            for drop in monster["drops"]:
-                monster_sources.setdefault(drop["code"], set()).add(monster["code"])
+        for monster, data in self._monster_data.items():
+            for drop in data["drops"]:
+                monster_sources.setdefault(drop["code"], set()).add(monster)
 
         return monster_sources 
     
+    # Item Checkers
     def is_an_item(self, item: str) -> bool:
         return item in self._item_data
     
-    def is_a_resource(self, resource: str) -> bool:
-        return resource in self._resource_sources
-    
-    def is_a_monster(self, monster: str) -> bool:
-        return monster in self._interactions.monsters
+    def is_equipment(self, item: str) -> bool:
+        return self.is_an_item(item) and not self.get_item_info(item)["type"] == "resource"
+            
+    def get_item_info(self, item: str) -> Dict:
+        if not self.is_an_item(item):
+            raise KeyError(f"{item} is not an item.")
+        
+        return self._item_data[item]
     
     def item_is_craftable(self, item: str) -> bool:
+        if not self.is_an_item(item):
+            raise KeyError(f"{item} is not an item.")
+        
         return self._item_data[item].get("craft") is not None
     
-    def get_locations_of_resource(self, resource: str) -> List[Tuple[int, int]]:
-        resource_tile = self._resource_sources[resource]
-
-        locations = []
-        for tile in resource_tile:
-            locations.extend(self._interactions.resources[tile])
-
-        return locations
+    def get_crafting_materials_for_item(self, item: str, qty=1) -> List[Tuple[str, int]] | None:
+        if not self.item_is_craftable(item):
+            raise KeyError(f"{item} is not craftable.")
+        
+        materials = self._item_data[item]["craft"]["items"]
+        return [{"code": m["code"], "quantity": m["quantity"] * qty} for m in materials]
     
-    def get_resource_at_location(self, x: int, y: int) -> str | None:
-        for resource, locations in self._interactions.resources.items():
-            if (x, y) in locations:
-                return resource
-            
-    def get_data_for_resource(self, resource: str) -> Dict | None:
-        for data in self._resource_data:
-            if data["code"] == resource:
-                return data
-
-    def get_locations_of_monster(self, monster: str) -> List[Tuple[int, int]]:
-        locations = self._interactions.monsters[monster]
-        return locations
-    
-    def get_monster_at_location(self, x: int, y: int) -> str | None:
-        for monster, locations in self._interactions.monsters.items():
-            if (x, y) in locations:
-                return monster
-    
-    def get_workshop_for_item(self, item: str) -> str :
+    def get_workshop_for_item(self, item: str) -> str:
+        if not self.item_is_craftable(item):
+            raise KeyError(f"{item} is not craftable.")
+        
         return self._item_data[item]["craft"]["skill"]
     
-    def get_equip_slot_for_item(self, item: str) -> str:
-        return self._item_data[item]["type"]
-    
-    def get_gather_skill_for_resource(self, item: str) -> str:
-        return self._item_data[item]["subtype"]
-    
-    def get_crafting_materials_for_item(self, item: str, qty=1) -> List[Tuple[str, int]]:
-        materials = self._item_data[item]["craft"]["items"]
-        return [{"item": m["code"], "quantity": m["quantity"] * qty} for m in materials]
-    
-    def get_bank_locations(self) -> List[Tuple[int, int]]:
-        return self._interactions.banks
-    
     def get_workshop_locations(self, skill: str) -> List[Tuple[int, int]]:
-        return self._interactions.workshops[skill]
+        if skill in self._interactions.workshops:
+            return self._interactions.workshops[skill]
+        
+        raise KeyError(f"{skill} is not a skill.")
     
-    def update_bank_data(self, bank_data: Dict[str, Any]):
-        self._bank_data = {}
-        for item in bank_data:
-            self._bank_data[item["code"]] = item["quantity"]
-
-    def get_amount_of_item_in_bank(self, item: str) -> int:
-        if self._bank_contains_item(item):
-            amount_in_bank = self._bank_data[item]
-            amount_reserved = self.get_amount_of_item_reserved_in_bank(item)
-            return amount_in_bank - amount_reserved
-        else:
-            return 0
+    def get_equip_slot_for_item(self, item: str) -> str:
+        if not self.is_equipment(item):
+            raise KeyError(f"{item} is not equipment.")
         
-    def get_amount_of_item_reserved_in_bank(self, item: str) -> int:
-        amount_reserved = 0
-        
-        for id, reserved_items in self.bank_reservations.items():
-            for reserved_item in reserved_items:
-                if reserved_item["code"] == item:
-                    amount_reserved += reserved_item["quantity"]
-
-        return amount_reserved
-        
-    def reserve_bank_items(self, items: List[Dict]) -> str:
-        id = str(uuid.uuid4())
-        self.bank_reservations[id] = items
-        return id
-
-    def clear_bank_reservation(self, id: str):
-        del self.bank_reservations[id]        
-       
-    def _bank_contains_items(self, items: List[ItemSelection]) -> bool:
-        for item in items:
-            if not self._bank_contains_item(item.item):
-                return False
-            
-        return True
-
-    def _bank_contains_item(self, item: str) -> bool:
-        return item in self._bank_data
+        return self._item_data[item]["type"]
     
     def get_best_tool_for_skill_in_bank(self, skill: str) -> Tuple[str, int] | None:
         tools = [
@@ -202,11 +150,87 @@ class WorldState:
         monster_data = self._monster_data[monster]
         raise NotImplementedError()
     
-    def get_gathering_skill_of_item(self, item: str, skill: str) -> int:
-        """Get gathering skill of an item; lower value equates to higher power."""
-        if effects := self._item_data[item]["effects"]:
-            for effect in effects:
-                if effect["code"] == skill:
-                    return effect["value"]
-                
-        return 0
+    # Resource Checkers
+    def is_a_resource(self, resource: str) -> bool:
+        return self.is_an_item(resource) and self.get_item_info(resource)["type"] == "resource"
+    
+    def get_resource_at_location(self, x: int, y: int) -> str | None:
+        for tile, locations in self._interactions.resources.items():
+            if (x, y) in locations:
+                return self._tile_to_resource[tile]
+    
+    def get_locations_of_resource(self, resource: str) -> List[Tuple[int, int]]:
+        if not self.is_a_resource(resource):
+            raise KeyError(f"{resource} is not a resource.")
+        
+        if not resource in self._resource_to_tile:
+            return []
+        
+        resource_tile = self._resource_to_tile[resource]
+
+        locations = set()
+        for tile in resource_tile:
+            locations.update(self._interactions.resources[tile])
+
+        return locations
+    
+    def get_gather_skill_for_resource(self, resource: str) -> str:
+        if not self.is_a_resource(resource):
+            raise KeyError(f"{resource} is not a resource.")
+        
+        return self.get_item_info(resource)["subtype"]
+    
+    # Monster Checkers
+    def is_a_monster(self, monster: str) -> bool:
+        return monster in self._interactions.monsters
+            
+    def get_monster_info(self, monster: str) -> Dict:
+        if not self.is_a_monster(monster):
+            raise KeyError(f"{monster} is not a monster.")
+        
+        return self._monster_data[monster]
+    
+    def get_monster_at_location(self, x: int, y: int) -> str | None:
+        for monster, locations in self._interactions.monsters.items():
+            if (x, y) in locations:
+                return monster
+
+    def get_locations_of_monster(self, monster: str) -> List[Tuple[int, int]]:
+        if not self.is_a_monster(monster):
+            raise KeyError(f"{monster} is not a monster.")
+        
+        locations = self._interactions.monsters[monster]
+        return locations
+    
+    # Bank Checkers
+    def get_bank_locations(self) -> List[Tuple[int, int]]:
+        return self._interactions.banks
+
+    def get_amount_of_item_in_bank(self, item: str) -> int:
+        if item in self._bank_data:
+            amount_in_bank = self._bank_data[item]
+            amount_reserved = self.get_amount_of_item_reserved_in_bank(item)
+            return amount_in_bank - amount_reserved
+        else:
+            return 0
+    
+    def update_bank_data(self, bank_data: Dict[str, Any]):
+        self._bank_data = {}
+        for item in bank_data:
+            self._bank_data[item["code"]] = item["quantity"]
+        
+    def reserve_bank_items(self, items: List[Dict]) -> str:
+        id = str(uuid.uuid4())
+        self.bank_reservations[id] = items
+        return id
+
+    def clear_bank_reservation(self, id: str):
+        del self.bank_reservations[id]      
+        
+    def get_amount_of_item_reserved_in_bank(self, item: str) -> int:
+        amount_reserved = 0
+        for id, reservation in self.bank_reservations.items():
+            for r in reservation:
+                amount_reserved += r["quantity"] if r["code"] == item else 0
+
+        return amount_reserved  
