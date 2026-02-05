@@ -189,6 +189,9 @@ class CharacterAgent:
         bank_quantity = self.world_state.get_amount_of_item_in_bank(item)
         return inv_quantity + bank_quantity >= quantity
     
+    def has_task(self) -> bool:
+        return self.char_data["task"] != ""
+    
 
     ## Action Performance
     async def perform(self, action: Action) -> ActionOutcome:
@@ -355,6 +358,12 @@ class CharacterAgent:
                     return ActionOutcome.CANCEL
                 
                 api_result = await self.api_client.craft(self.name, item, quantity)
+
+            case CharacterAction.GET_TASK:
+                api_result = await self.api_client.accept_new_task(self.name)
+
+            case CharacterAction.COMPLETE_TASK:
+                api_result = await self.api_client.complete_task(self.name)
         
             case _:
                 raise Exception(f"[{self.name}] Unknown action type: {action.type}")

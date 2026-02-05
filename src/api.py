@@ -74,22 +74,47 @@ class APIClient:
         response.raise_for_status()
         return response.json()
 
-    ## API General Requests
+    ## API General Requests for Characters
     async def move(self, character_name: str, x: int, y: int) -> APIResult:
         payload = { "x": x, "y": y }
         response = await self._client.post(f"/my/{character_name}/action/move", json=payload)
         return await self.handle_status(response)
-
-    async def fight(self, character_name: str) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/fight")
-        return await self.handle_status(response)
+    
+    async def transition(self) -> APIResult:
+        raise NotImplementedError()
 
     async def rest(self, character_name: str) -> APIResult:
         response = await self._client.post(f"/my/{character_name}/action/rest")
         return await self.handle_status(response)
 
+    async def equip(self, character_name: str, item_code: str, item_slot: str, ) -> APIResult:
+        payload = { "code": item_code, "slot": item_slot }
+        response = await self._client.post(f"/my/{character_name}/action/equip", json=payload)
+        return await self.handle_status(response)
+
+    async def unequip(self, character_name: str, item_slot: str) -> APIResult:
+        payload = { "slot": item_slot }
+        response = await self._client.post(f"/my/{character_name}/action/unequip", json=payload)
+        return await self.handle_status(response)
+    
+    async def use(self) -> APIResult:
+        raise NotImplementedError()
+
+    async def fight(self, character_name: str) -> APIResult:
+        response = await self._client.post(f"/my/{character_name}/action/fight")
+        return await self.handle_status(response)
+
     async def gather(self, character_name: str) -> APIResult:
         response = await self._client.post(f"/my/{character_name}/action/gathering")
+        return await self.handle_status(response)
+
+    async def craft(self, character_name: str, item_code: str, quantity: int = 1) -> APIResult:
+        payload = { "code": item_code, "quantity": quantity }
+        response = await self._client.post(f"/my/{character_name}/action/crafting", json=payload)
+        return await self.handle_status(response)
+
+    async def bank_deposit_gold(self, character_name: str, quantity: int) -> APIResult:
+        response = await self._client.post(f"/my/{character_name}/action/bank/deposit/gold", json=quantity)
         return await self.handle_status(response)
 
     async def bank_deposit_item(self, character_name: str, items: List[Dict[str, str | int]]) -> APIResult:
@@ -100,28 +125,60 @@ class APIClient:
         response = await self._client.post(f"/my/{character_name}/action/bank/withdraw/item", json=items)
         return await self.handle_status(response)
 
-    async def bank_deposit_gold(self, character_name: str, quantity: int) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/bank/deposit/gold", json=quantity)
-        return await self.handle_status(response)
-
     async def bank_withdraw_gold(self, character_name: str, quantity: int) -> APIResult:
         response = await self._client.post(f"/my/{character_name}/action/bank/withdraw/gold", json=quantity)
         return await self.handle_status(response)
-
-    async def unequip(self, character_name: str, item_slot: str) -> APIResult:
-        payload = { "slot": item_slot }
-        response = await self._client.post(f"/my/{character_name}/action/unequip", json=payload)
+    
+    async def buy_bank_expansion(self) -> APIResult:
+        raise NotImplementedError()
+    
+    async def npc_buy_item(self) -> APIResult:
+        raise NotImplementedError()
+    
+    async def npc_sell_item(self) -> APIResult:
+        raise NotImplementedError()
+    
+    async def recycle(self) -> APIResult:
+        raise NotImplementedError()
+    
+    async def ge_buy_item(self) -> APIResult:
+        raise NotImplementedError()
+    
+    async def ge_create_sell_order(self) -> APIResult:
+        raise NotImplementedError()
+    
+    async def ge_cancel_sell_order(self) -> APIResult:
+        raise NotImplementedError()
+    
+    async def complete_task(self, character_name: str) -> APIResult:
+        response = await self._client.post(f"/my/{character_name}/action/task/complete")
         return await self.handle_status(response)
-
-    async def craft(self, character_name: str, item_code: str, quantity: int = 1) -> APIResult:
+    
+    async def task_exchange(self, character_name: str) -> APIResult:
+        response = await self._client.post(f"/my/{character_name}/action/task/exchange")
+        return await self.handle_status(response)
+    
+    async def accept_new_task(self, character_name: str) -> APIResult:
+        response = await self._client.post(f"/my/{character_name}/action/task/new")
+        return await self.handle_status(response)
+    
+    async def task_trade(self, character_name: str, item_code: str, quantity: int) -> APIResult:
         payload = { "code": item_code, "quantity": quantity }
-        response = await self._client.post(f"/my/{character_name}/action/crafting", json=payload)
+        response = await self._client.post(f"/my/{character_name}/action/task/trade", json=payload)
         return await self.handle_status(response)
-
-    async def equip(self, character_name: str, item_code: str, item_slot: str, ) -> APIResult:
-        payload = { "code": item_code, "slot": item_slot }
-        response = await self._client.post(f"/my/{character_name}/action/equip", json=payload)
+    
+    async def task_cancel(self, character_name: str) -> APIResult:
+        response = await self._client.post(f"/my/{character_name}/action/task/cancel")
         return await self.handle_status(response)
+    
+    async def give_gold(self) -> APIResult:
+        raise NotImplementedError()
+    
+    async def give_items(self) -> APIResult:
+        raise NotImplementedError()
+    
+    async def delete_item(self) -> APIResult:
+        raise NotImplementedError()
     
     async def handle_status(self, response: httpx.Response) -> APIResult:
         try:
@@ -129,7 +186,6 @@ class APIClient:
         except:
             data = {"raw": response.text}
     
-
         match response.status_code:
             case 200:
                 # All good
