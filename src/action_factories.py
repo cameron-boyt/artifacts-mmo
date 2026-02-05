@@ -58,3 +58,10 @@ def bank_withdraw_gold(**params) -> Action:
 
 def bank_all_gold() -> Action:
     return Action(CharacterAction.BANK_DEPOSIT_GOLD, params={"preset": "all"})
+
+# Tasks
+def get_task() -> Action:
+    return Action(CharacterAction.GET_TASK)
+
+def complete_task() -> Action:
+    return Action(CharacterAction.COMPLETE_TASK)

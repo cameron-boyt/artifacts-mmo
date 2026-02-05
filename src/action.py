@@ -22,6 +22,12 @@ class CharacterAction(Enum):
     UNEQUIP = "Unequip"
     USE = "Use"
 
+    GET_TASK = "Get Task"
+    COMPLETE_TASK = "Complete Task"
+    CANCEL_TASK = "Cancel Task"
+    TASK_EXCHANGE = "Task Exchange"
+    TASK_TRADE = "Task Trade"
+
 class ActionCondition(Enum):
     NONE = auto()
     INVENTORY_FULL = auto()
@@ -31,6 +37,9 @@ class ActionCondition(Enum):
     BANK_HAS_ITEM_OF_QUANTITY = auto()
     INVENTORY_HAS_ITEM_OF_QUANTITY = auto()
     BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY = auto()
+    HAS_TASK = auto()
+    HAS_TASK_OF_TYPE = auto()
+    TASK_COMPLETE = auto()
     FOREVER = auto()
 
 class ActionOutcome(Enum):

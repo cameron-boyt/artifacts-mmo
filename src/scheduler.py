@@ -243,6 +243,16 @@ class ActionScheduler:
                     quantity = expression.parameters["quantity"]
                     condition_met = agent.bank_and_inventory_have_item_of_quantity(item, quantity)
 
+                case ActionCondition.HAS_TASK:
+                    condition_met = agent.has_task()
+
+                case ActionCondition.HAS_TASK_OF_TYPE:
+                    task_type = expression.parameters["type"]
+                    condition_met = agent.char_data["task_type"] == task_type
+
+                case ActionCondition.TASK_COMPLETE:
+                    condition_met = agent.char_data["task_total"] == agent.char_data["task_progress"]
+
                 case _:
                     raise NotImplementedError()
                 

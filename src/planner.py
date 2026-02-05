@@ -33,6 +33,12 @@ class Intention(Enum):
     WITHDRAW_GOLD = auto()
     DEPOSIT_GOLD = auto()
 
+    # Tasks
+    COMPLETE_TASKS = auto()
+    COMPLETE_FIGHTING_TASK = auto()
+    COMPLETE_GATHERING_TASK = auto()
+    COMPLETE_CRAFTING_TASK = auto()
+
     # Complex Intentions
     PREPARE_FOR_GATHERING =  auto()
     PREPARE_FOR_FIGHTING = auto()
@@ -152,6 +158,48 @@ class ActionPlanner:
                     move(closest_of=bank_locations),
                     bank_deposit_gold(quantity=quantity)
                 )
+            
+            # Task Execution
+            case Intention.COMPLETE_TASKS:
+                return action_group(
+                    IF(
+                        (not(cond(ActionCondition.HAS_TASK)), get_task())
+                    ),
+                    IF(
+                        (cond(ActionCondition.HAS_TASK_OF_TYPE, type="fighting"), self.plan(ActionIntent(Intention.COMPLETE_FIGHTING_TASK))),
+                        (cond(ActionCondition.HAS_TASK_OF_TYPE, type="gathering"), self.plan(ActionIntent(Intention.COMPLETE_GATHERING_TASK))),
+                        (cond(ActionCondition.HAS_TASK_OF_TYPE, type="crafting"), self.plan(ActionIntent(Intention.COMPLETE_CRAFTING_TASK)))
+                    ),
+                    complete_task(),
+                    until=ActionCondition.FOREVER
+                )
+
+            case Intention.COMPLETE_FIGHTING_TASK:
+                monster = intent.params.get("monster")
+                return action_group(
+                    self.plan(ActionIntent(Intention.PREPARE_FOR_FIGHTING, on_task=True)),
+                    REPEAT(
+                        self.plan(ActionIntent(Intention.FIGHT_THEN_REST, on_task=True)),
+                        until=cond(ActionCondition.TASK_COMPLETE)
+                    )
+                )
+                
+            case Intention.COMPLETE_GATHERING_TASK:
+                resource = intent.params.get("resource")
+                return action_group(
+                    self.plan(ActionIntent(Intention.PREPARE_FOR_GATHERING, on_task=True)),
+                    REPEAT(
+                        action_group(
+                            self.plan(ActionIntent(Intention.GATHER, on_task=True, until=cond(ActionCondition.INVENTORY_FULL))),
+                            bank_all_items()
+                        ),
+                        until=cond(ActionCondition.TASK_COMPLETE)
+                    )
+                )
+                
+            case Intention.COMPLETE_CRAFTING_TASK:
+                pass
+                
             
             # Complex Intentions
             case Intention.PREPARE_FOR_GATHERING:
