@@ -45,13 +45,12 @@ def agent() -> CharacterAgent:
     ]
 )
 
-def test__get_closest_location__cases(agent: CharacterAgent, start, locations, expected):
+def test__get_closest_location(agent: CharacterAgent, start, locations, expected):
     agent.char_data["x"], agent.char_data["y"] = start
     result = agent._get_closest_location(locations)
     assert result == expected
    
 #_construct_item_list
-
 def order_single_exact(code: str, qty: int, greedy=False, check_inv=False):
     return ItemOrder(
         items=[ItemSelection(code, ItemQuantity(min=qty, max=qty))],
@@ -340,120 +339,162 @@ def order_multi(items: list[tuple[str, ItemQuantity]], greedy=False, check_inv=F
     ]
 )
 
-def test__construct_item_list__cases(agent: CharacterAgent, order, inv, bank, expected):
+def test__construct_item_list(agent: CharacterAgent, order, inv, bank, expected):
     set_inv(agent, inv)
     set_bank(agent, bank)
     result = agent._construct_item_list(order)
     assert result == expected
 
 #get_number_of_items_in_inventory
-def test__get_number_of_items_in_inventory__inv_empty(agent: CharacterAgent):
-    assert agent.get_number_of_items_in_inventory() == 0
+@pytest.mark.parametrize(
+    "inv,expected",
+    [
+        pytest.param({}, 0, id="empty_inv"),
+        pytest.param({ "copper_ore": 10 }, 10, id="partial_inv__single_item"),
+        pytest.param({ "copper_ore": 10, "iron_ore": 5 }, 15, id="partial_inv__multiple_items"),
+    ]
+)
 
-def test__get_number_of_items_in_inventory__inv_filled(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15, "ash_wood": 3, "sunflower": 4})
-    assert agent.get_number_of_items_in_inventory() == 27
+def test__get_number_of_items_in_inventory(agent: CharacterAgent, inv, expected):
+    set_inv(agent, inv)
+    result = agent.get_number_of_items_in_inventory()
+    assert result == expected
 
 #get_inventory_size
 def test__get_inventory_size(agent: CharacterAgent):
     assert agent.get_inventory_size() == 100
 
 #get_free_inventory_spaces
-def test__get_free_inventory_spaces__empty_inv(agent: CharacterAgent):
-    assert agent.get_free_inventory_spaces() == 100
+@pytest.mark.parametrize(
+    "inv,expected",
+    [
+        pytest.param({}, 100, id="empty_inv"),
+        pytest.param({ "copper_ore": 10 }, 90, id="partial_inv__single_item"),
+        pytest.param({ "copper_ore": 10, "iron_ore": 5 }, 85, id="partial_inv__multiple_items"),
+        pytest.param({ "copper_ore": 100 }, 0, id="full_inv"),
+    ]
+)
 
-def test__get_free_inventory_spaces__populated_inv(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.get_free_inventory_spaces() == 80
+def test__get_free_inventory_spaces(agent: CharacterAgent, inv, expected):
+    set_inv(agent, inv)
+    result = agent.get_free_inventory_spaces()
+    assert result == expected
 
 #get_quantity_of_item_in_inventory
-def test__get_quantity_of_item_in_inventory__no_item(agent: CharacterAgent):
-    assert agent.get_quantity_of_item_in_inventory("copper_ore") == 0
+@pytest.mark.parametrize(
+    "inv,item,expected",
+    [
+        pytest.param({}, "copper_ore", 0, id="not_in_inv"),
+        pytest.param({ "copper_ore": 10 }, "copper_ore", 10, id="in_inv__single_item"),
+        pytest.param({ "copper_ore": 10, "item_ore": 5 }, "item_ore", 5, id="in_inv__multiple_items"),
+    ]
+)
 
-def test__get_quantity_of_item_in__inventory_inv_full__no_item(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.get_quantity_of_item_in_inventory("random_item") == 0
-
-def test__get_quantity_of_item_in__inventory_inv_full__has_item(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.get_quantity_of_item_in_inventory("copper_ore") == 5
-    assert agent.get_quantity_of_item_in_inventory("iron_ore") == 15
+def test__get_quantity_of_item_in_inventory(agent: CharacterAgent, inv, item, expected):
+    set_inv(agent, inv)
+    result = agent.get_quantity_of_item_in_inventory(item)
+    assert result == expected
 
 ## Condition Checkers
 #inventory_full
-def test__inventory_full__no_items(agent: CharacterAgent):
-    assert not agent.inventory_full()
+@pytest.mark.parametrize(
+    "inv,expected",
+    [
+        pytest.param({}, False, id="empty_inv"),
+        pytest.param({ "copper_ore": 10 }, False, id="partial_inv"),
+        pytest.param({ "copper_ore": 10, "iron_ore": 5, "mithril_ore": 85 }, True, id="full_inv"),
+    ]
+)
 
-def test__inventory_full__no_items__zero_max_inv_space(agent: CharacterAgent):
-    agent.char_data["inventory_max_items"] = 0
-    assert agent.inventory_full()
-
-def test__inventory_full__partial_fill(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert not agent.inventory_full()
-
-def test__inventory_full__completed_filled(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15, "ash_wood": 80})
-    assert agent.inventory_full()
+def test__inventory_full(agent: CharacterAgent, inv, expected):
+    set_inv(agent, inv)
+    result = agent.inventory_full()
+    assert result == expected
 
 #inventory_empty
-def test__inventory_empty__no_items(agent: CharacterAgent):
-    assert agent.inventory_empty()
+@pytest.mark.parametrize(
+    "inv,expected",
+    [
+        pytest.param({}, True, id="empty_inv"),
+        pytest.param({ "copper_ore": 10 }, False, id="partial_inv"),
+        pytest.param({ "copper_ore": 10, "iron_ore": 5, "mithril_ore": 85 }, False, id="full_inv"),
+    ]
+)
 
-def test__inventory_empty__partial_fill(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert not agent.inventory_empty()
-
-def test__inventory_empty__no_items__no_max_space(agent: CharacterAgent):
-    agent.char_data["inventory_max_items"] = 0
-    assert agent.inventory_full()
+def test__inventory_empty(agent: CharacterAgent, inv, expected):
+    set_inv(agent, inv)
+    result = agent.inventory_empty()
+    assert result == expected
 
 #inventory_has_available_space
-def test__inventory_has_available_space__empty_inv__low_request(agent: CharacterAgent):
-    assert agent.inventory_has_available_space(10)
+@pytest.mark.parametrize(
+    "inv,space,expected",
+    [
+        pytest.param({}, 10, True, id="empty_inv__low_request"),
+        pytest.param({}, 110, False, id="empty_inv__request_above_inv_capacity"),
+        pytest.param({ "copper_ore": 10 }, 10, True, id="partial_inv__low_request"),
+        pytest.param({ "copper_ore": 10 }, 95, False, id="partial_inv__high_request"),
+    ]
+)
 
-def test__inventory_has_available_space__empty_inv__request_above_inv_capacity(agent: CharacterAgent):
-    assert not agent.inventory_has_available_space(110)
-
-def test__inventory_has_available_space__partially_filled_inv__low_request(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.inventory_has_available_space(10)
-
-def test__inventory_has_available_space__partially_filled_inv__high_request(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert not agent.inventory_has_available_space(90)
+def test__inventory_has_available_space(agent: CharacterAgent, inv, space, expected):
+    set_inv(agent, inv)
+    result = agent.inventory_has_available_space(space)
+    assert result == expected
 
 #inventory_has_item_of_quantity
-def test__inventory_has_item_of_quantity__empty_inv(agent: CharacterAgent):
-    assert not agent.inventory_has_item_of_quantity("copper_ore", 10)
+@pytest.mark.parametrize(
+    "inv,item,quantity,expected",
+    [
+        pytest.param({}, "copper_ore", 10, False, id="empty_inv"),
+        pytest.param({ "copper_ore": 5 }, "iron_ore", 5, False, id="partial_inv__no_item"),
+        pytest.param({ "copper_ore": 5 }, "copper_ore", 4, True, id="partial_inv__sufficient_quantity"),
+        pytest.param({ "copper_ore": 5 }, "copper_ore", 5, True, id="partial_inv__exact_quantity"),
+        pytest.param({ "copper_ore": 5 }, "copper_ore", 6, False, id="partial_inv__low_quantity"),
+    ]
+)
 
-def test__inventory_has_item_of_quantity__partially_filled_inv__no_item(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert not agent.inventory_has_item_of_quantity("ash_wood", 5)
-
-def test__inventory_has_item_of_quantity__has_item__exact_quantity(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.inventory_has_item_of_quantity("copper_ore", 5)
-
-def test__inventory_has_item_of_quantity__has_item__low_quantity(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert agent.inventory_has_item_of_quantity("copper_ore", 3)
-
-def test__inventory_has_item_of_quantity__has_item__too_high_quantity(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5, "iron_ore": 15})
-    assert not agent.inventory_has_item_of_quantity("copper_ore", 10)
+def test__inventory_has_item_of_quantity(agent: CharacterAgent, inv, item, quantity, expected):
+    set_inv(agent, inv)
+    result = agent.inventory_has_item_of_quantity(item, quantity)
+    assert result == expected
 
 #bank_has_item_of_quantity
-def test__bank_has_item_of_quantity__bank_has_sufficent(agent: CharacterAgent):
-    assert agent.bank_has_item_of_quantity("copper_ore", 5)
+@pytest.mark.parametrize(
+    "bank,item,quantity,expected",
+    [
+        pytest.param({}, "copper_ore", 10, False, id="empty_bank"),
+        pytest.param({ "copper_ore": 5 }, "iron_ore", 5, False, id="partial_bank__no_item"),
+        pytest.param({ "copper_ore": 5 }, "copper_ore", 4, True, id="partial_bank__sufficient_quantity"),
+        pytest.param({ "copper_ore": 5 }, "copper_ore", 5, True, id="partial_bank__exact_quantity"),
+        pytest.param({ "copper_ore": 5 }, "copper_ore", 6, False, id="partial_bank__low_quantity"),
+    ]
+)
 
-def test__bank_has_item_of_quantity__bank_has_exact(agent: CharacterAgent):
-    assert agent.bank_has_item_of_quantity("copper_ore", 15)
-
-def test__bank_has_item_of_quantity__bank_has_insufficent(agent: CharacterAgent):
-    assert not agent.bank_has_item_of_quantity("copper_ore", 25)
+def test__bank_has_item_of_quantity(agent: CharacterAgent, bank, item, quantity, expected):
+    set_bank(bank)
+    result = agent.bank_has_item_of_quantity(item, quantity)
+    assert result == expected
 
 #bank_and_inventory_have_item_of_quantity
+@pytest.mark.parametrize(
+    "inv,bank,item,quantity,expected",
+    [
+        pytest.param({}, "copper_ore", 10, False, id="empty_inv"),
+        pytest.param({ "copper_ore": 5 }, "iron_ore", 5, False, id="partial_inv__no_item"),
+        pytest.param({ "copper_ore": 5 }, "copper_ore", 4, True, id="partial_inv__sufficient_quantity"),
+        pytest.param({ "copper_ore": 5 }, "copper_ore", 5, True, id="partial_inv__exact_quantity"),
+        pytest.param({ "copper_ore": 5 }, "copper_ore", 6, False, id="partial_inv__low_quantity"),
+    ]
+)
+
+def test__bank_and_inventory_have_item_of_quantity(agent: CharacterAgent, inv, bank, item, quantity, expected):
+    set_inv(agent, inv)
+    set_bank(bank)
+    result = agent.bank_and_inventory_have_item_of_quantity(item, quantity)
+    assert result == expected
+
+
 def test__bank_and_inventory_have_item_of_quantity__both_sufficient(agent: CharacterAgent):
     set_inv(agent, {"copper_ore": 20})
     assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 10)
