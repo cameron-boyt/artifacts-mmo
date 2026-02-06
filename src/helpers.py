@@ -24,7 +24,11 @@ class ItemQuantity:
 
     def __post_init__(self):
         # Require a min or max selection OR multiple of
-        assert(self.max > 0 or self.min > 0 or self.multiple_of)
+        assert((self.max is not None and self.max > 0) or (self.min is not None and self.min > 0) or self.multiple_of)
+
+        # If both min and max are assigned, min must be no larger than max
+        if self.min and self.max:
+            assert(self.min <= self.max)
 
         # If not defined, set min to -INF and max to +INF
         if not self.max:

@@ -55,6 +55,8 @@ class CharacterAgent:
         inv = {}
         bank = {}
 
+        free_inv_spaces = self.get_free_inventory_spaces()
+
         for item in order.items:
             i = item.item
             inv[i] = self.get_quantity_of_item_in_inventory(i)
@@ -68,28 +70,47 @@ class CharacterAgent:
 
             # Clamp the quantity within the avilability count and the min/max bounds
             if available_quantity < item.quantity.min:
-                return 0
+                return []
+            elif item.quantity.min <= free_inv_spaces <= item.quantity.max:
+                quantity = min(item.quantity.max, bank[i], free_inv_spaces)
+            elif (
+                (order.check_inv and inv[i] + free_inv_spaces < item.quantity.min) or
+                (not order.check_inv and free_inv_spaces < item.quantity.min)
+            ):
+                return []
             else:
-                quantity = min(item.quantity.max, available_quantity)
-            
-            # If set, apply a 'multiple of' rounding; i.e. get quantity in multiples of 5, 10 etc.
-            if item.quantity.multiple_of:
+                quantity = min(item.quantity.max, bank[i])
+        
+            # If we only want to withdraw the needed amount, check how much we have in the inventory
+            if order.check_inv and not order.greedy_order:
+                if item.quantity.multiple_of:
+                    # If we're working with multiples, we can always safely remove all inventory quantities
+                    quantity = ((quantity + inv[i]) // item.quantity.multiple_of) * item.quantity.multiple_of
+                    quantity = max(0, quantity - inv[i])
+                    
+                    # if quantity <= 0:
+                    #     return []
+                else:
+                    # Otherwise, only subtract if the chosen quantity + count in inventory surpass the range max
+                    quantity = min(free_inv_spaces, max(0, quantity - max(0, (quantity + inv[i]) - item.quantity.max)))
+            elif item.quantity.multiple_of:
+                # Apply a 'multiple of' rounding; i.e. get quantity in multiples of 5, 10 etc.
                 quantity = (quantity // item.quantity.multiple_of) * item.quantity.multiple_of
 
-            per_set[i] = quantity
-
+                if quantity <= 0:
+                    return []
+            
             items.append({ "code": i, "quantity": quantity })
+            per_set[i] = quantity
+            free_inv_spaces -= quantity
 
-        # If we only want to withdraw the needed amount, check how much we have in the inventory
-        if order.check_inv and not order.greedy_order:
-            for item in items:
-                quantity_in_inv = self.get_quantity_of_item_in_inventory(item["code"])
-                item["quantity"] -= quantity_in_inv
+        # Check the we have sufficient inventory space
+        items_per_set = sum(per_set.values())
+        if self.get_free_inventory_spaces() < items_per_set:
+            return []
 
         # Withdraw multiple sets of the desired items until the inventory is full
         if order.greedy_order:
-            items_per_set = sum(per_set.values())
-            
             if order.check_inv:
                 sets_from_inv = min(floor(inv[item["code"]] / per_set[item["code"]]) for item in items)
             else:
@@ -101,9 +122,15 @@ class CharacterAgent:
             additional_sets_needed = max(0, sets_target - sets_from_inv)
 
             if order.check_inv:
-                need = [{"code": item["code"], "quantity": max(0, additional_sets_needed * per_set[item["code"]]) - inv[item["code"]]} for item in items]
+                need = [
+                    {
+                        "code": item["code"], 
+                        "quantity": max(0, additional_sets_needed * per_set[item["code"]]) - (inv[item["code"]] - (sets_from_inv * per_set[item["code"]]))
+                    } 
+                    for item in items
+                ]
             else:
-                need = [{"code": item["code"], "quantity": max(0, additional_sets_needed * per_set[item["code"]])} for item in need]
+                need = [{"code": item["code"], "quantity": max(0, additional_sets_needed * per_set[item["code"]])} for item in items]
 
             items = need
 
