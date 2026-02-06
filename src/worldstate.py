@@ -4,6 +4,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from typing import Dict, List, Set, Tuple, Any
+from math import floor, ceil
 
 from src.helpers import *
 
@@ -146,9 +147,41 @@ class WorldState:
         else:
             return None
         
-    def get_best_weapon_for_monster_in_bank(self, monster: str) -> str | None:
-        monster_data = self._monster_data[monster]
-        raise NotImplementedError()
+    def get_best_weapon_for_monster_in_bank(self, monster: str) -> Tuple[str, int] | None:
+        weapons = [
+            item for item in self._bank_data 
+            if self._item_data[item]["type"] == "weapon"
+        ]
+
+        if len(weapons) > 0:
+            monster_data = self._monster_data[monster]
+            weapon_damage = []
+            for weapon in weapons:
+                air = 0
+                water = 0
+                earth = 0
+                fire = 0
+
+                for effect in self._item_data[weapon]["effects"]:
+                    match effect["code"]:
+                        case "attack_air":
+                            air = floor(effect["value"] * (1 + int(monster_data["res_air"]) / 100))
+
+                        case "attack_water":
+                            water = floor(effect["value"] * (1 + int(monster_data["res_air"]) / 100))
+
+                        case "attack_earth":
+                            earth = floor(effect["value"] * (1 + int(monster_data["res_air"]) / 100))
+
+                        case "attack_fire":
+                            fire = floor(effect["value"] * (1 + int(monster_data["res_air"]) / 100))
+
+                weapon_damage.append((weapon, air + water + earth + fire))
+
+            best_weapon = max(weapon_damage, key=lambda w: w[1])
+            return best_weapon
+        else:
+            return None
     
     # Resource Checkers
     def is_a_resource(self, resource: str) -> bool:

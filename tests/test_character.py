@@ -472,7 +472,7 @@ def test__inventory_has_item_of_quantity(agent: CharacterAgent, inv, item, quant
 )
 
 def test__bank_has_item_of_quantity(agent: CharacterAgent, bank, item, quantity, expected):
-    set_bank(bank)
+    set_bank(agent, bank)
     result = agent.bank_has_item_of_quantity(item, quantity)
     assert result == expected
 
@@ -480,42 +480,19 @@ def test__bank_has_item_of_quantity(agent: CharacterAgent, bank, item, quantity,
 @pytest.mark.parametrize(
     "inv,bank,item,quantity,expected",
     [
-        pytest.param({}, "copper_ore", 10, False, id="empty_inv"),
-        pytest.param({ "copper_ore": 5 }, "iron_ore", 5, False, id="partial_inv__no_item"),
-        pytest.param({ "copper_ore": 5 }, "copper_ore", 4, True, id="partial_inv__sufficient_quantity"),
-        pytest.param({ "copper_ore": 5 }, "copper_ore", 5, True, id="partial_inv__exact_quantity"),
-        pytest.param({ "copper_ore": 5 }, "copper_ore", 6, False, id="partial_inv__low_quantity"),
+        pytest.param({}, {}, "copper_ore", 10, False, id="both_empty"),
+        pytest.param({}, { "cooper_ore": 3 }, "copper_ore", 10, False, id="bank_empty__inv_insufficient"),
+        pytest.param({ "cooper_ore": 3 }, {}, "copper_ore", 10, False, id="bank_insufficient__inv_empty"),
+        pytest.param({ "cooper_ore": 3 }, { "cooper_ore": 5 }, "copper_ore", 10, False, id="both_insufficient__total_insufficient"),
+        pytest.param({ "cooper_ore": 6 }, { "cooper_ore": 5 }, "copper_ore", 10, False, id="both_insufficient__total_sufficient"),
+        pytest.param({}, { "cooper_ore": 11 }, "copper_ore", 10, False, id="bank_sufficient"),
+        pytest.param({ "cooper_ore": 11 }, {}, "copper_ore", 10, False, id="inv_sufficient"),
     ]
 )
 
 def test__bank_and_inventory_have_item_of_quantity(agent: CharacterAgent, inv, bank, item, quantity, expected):
     set_inv(agent, inv)
-    set_bank(bank)
+    set_bank(agent, bank)
     result = agent.bank_and_inventory_have_item_of_quantity(item, quantity)
     assert result == expected
-
-
-def test__bank_and_inventory_have_item_of_quantity__both_sufficient(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 20})
-    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 10)
-
-def test__bank_and_inventory_have_item_of_quantity__bank_insufficient__inv_sufficient(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 20})
-    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 18)
-
-def test__bank_and_inventory_have_item_of_quantity__bank_sufficient__inv_insufficient(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 10})
-    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 12)
-
-
-def test__bank_and_inventory_have_item_of_quantity__both_insufficient__total_sufficient(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5})
-    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 18)
-
-def test__bank_and_inventory_have_item_of_quantity__both_insufficient__total_exact(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5})
-    assert agent.bank_and_inventory_have_item_of_quantity("copper_ore", 20)
-
-def test__bank_and_inventory_have_item_of_quantity__both_insufficient__total_insufficient(agent: CharacterAgent):
-    set_inv(agent, {"copper_ore": 5})
-    assert not agent.bank_and_inventory_have_item_of_quantity("copper_ore", 25)
+    

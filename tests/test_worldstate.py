@@ -24,198 +24,317 @@ def world_state() -> WorldState:
 
 ## Item Checkers
 #is_an_item
-def test__is_an_item__is_item(world_state: WorldState):
-    assert world_state.is_an_item("copper_ore")
+@pytest.mark.parametrize(
+    "item,expected",
+    [
+        pytest.param("copper_ore", True, id="is_item"),
+        pytest.param("copper_pickaxe", True, id="is_equipment"),
+        pytest.param("chicken", False, id="is_monster"),
+        pytest.param("fake", False, id="is_fake"),
+    ]
+)
 
-def test__is_an_item__not_item(world_state: WorldState):
-    assert not world_state.is_an_item("fake")
+def test__is_an_item(world_state: WorldState, item, expected):
+    result = world_state.is_an_item(item)
+    assert result == expected
 
 #is_equipment
-def test__is_equipment__is_equipment(world_state: WorldState):
-    assert world_state.is_equipment("copper_pickaxe")
+@pytest.mark.parametrize(
+    "item,expected",
+    [
+        pytest.param("copper_pickaxe", True, id="is_equipment"),
+        pytest.param("copper_ore", False, id="is_item"),
+        pytest.param("chicken", False, id="is_monster"),
+        pytest.param("fake", False, id="is_fake"),
+    ]
+)
 
-def test__is_equipment__is_resource(world_state: WorldState):
-    assert not world_state.is_equipment("copper_ore")
-
-def test__is_equipment__is_monster(world_state: WorldState):
-    assert not world_state.is_equipment("chicken")
-
-def test__is_equipment__is_fake(world_state: WorldState):
-    assert not world_state.is_equipment("fake")
+def test__is_equipment(world_state: WorldState, item, expected):
+    result = world_state.is_equipment(item)
+    assert result == expected
 
 #get_item_info
-def test__get_item_info__is_item(world_state: WorldState):
-    assert world_state.get_item_info("copper_ore")
+@pytest.mark.parametrize(
+    "item,expected,exception",
+    [
+        pytest.param("copper_ore", True, None, id="is_item"),
+        pytest.param("copper_pickaxe", True, None, id="is_equipment"),
+        pytest.param("chicken", None, KeyError, id="is_monster"),
+        pytest.param("fake", None, KeyError, id="is_fake"),
+    ]
+)
 
-def test__get_item_info__not_item(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_item_info("chicken")
-
-def test__get_item_info__is_fake(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_item_info("fake")  
+def test__get_item_info(world_state: WorldState, item, expected, exception):
+    if exception:
+        with pytest.raises(exception):
+            world_state.get_item_info(item)
+    else:
+        result = world_state.get_item_info(item)
+        assert isinstance(result, dict) == expected
 
 #item_is_craftable
-def test__item_is_craftable__is_craftable(world_state: WorldState):
-    assert world_state.item_is_craftable("copper_bar")
-    
-def test__item_is_craftable__not_craftable(world_state: WorldState):
-    assert not world_state.item_is_craftable("copper_ore")
+@pytest.mark.parametrize(
+    "item,expected,exception",
+    [
+        pytest.param("copper_pickaxe", True, None, id="is_craftable"),
+        pytest.param("copper_ore", False, None, id="is_not_craftable"),
+        pytest.param("chicken", None, KeyError, id="is_monster"),
+        pytest.param("fake", None, KeyError, id="is_fake"),
+    ]
+)
 
-def test__item_is_craftable__is_monster(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.item_is_craftable("chicken")
-
-def test__item_is_craftable__is_fake(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.item_is_craftable("fake")
+def test__item_is_craftable(world_state: WorldState, item, expected, exception):
+    if exception:
+        with pytest.raises(exception):
+            world_state.item_is_craftable(item)
+    else:
+        result = world_state.item_is_craftable(item)
+        assert result == expected
     
 #get_crafting_materials_for_item
-def test__get_crafting_materials_for_item__is_craftable(world_state: WorldState):
-    assert world_state.get_crafting_materials_for_item("copper_bar") == [{ "code": "copper_ore", "quantity": 10 }]
+@pytest.mark.parametrize(
+    "item,expected,exception",
+    [
+        pytest.param("copper_bar", [{ "code": "copper_ore", "quantity": 10 }], None, id="is_craftable"),
+        pytest.param("copper_ore", None, KeyError, id="is_not_craftable"),
+        pytest.param("chicken", None, KeyError, id="is_monster"),
+        pytest.param("fake", None, KeyError, id="is_fake"),
+    ]
+)
 
-def test__get_crafting_materials_for_item__not_craftable(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_crafting_materials_for_item("copper_ore")
-
-def test__get_crafting_materials_for_item__is_fake(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_crafting_materials_for_item("fake")
+def test__get_crafting_materials_for_item(world_state: WorldState, item, expected, exception):
+    if exception:
+        with pytest.raises(exception):
+            world_state.get_crafting_materials_for_item(item)
+    else:
+        result = world_state.get_crafting_materials_for_item(item)
+        assert result == expected
 
 #get_workshop_for_item
-def test__get_workshop_for_item__is_craftable(world_state: WorldState):
-    assert world_state.get_workshop_for_item("copper_bar") == "mining"
+@pytest.mark.parametrize(
+    "item,expected,exception",
+    [
+        pytest.param("copper_bar", "mining", None, id="is_craftable"),
+        pytest.param("copper_ore", None, KeyError, id="is_not_craftable"),
+        pytest.param("chicken", None, KeyError, id="is_monster"),
+        pytest.param("fake", None, KeyError, id="is_fake"),
+    ]
+)
 
-def test__get_workshop_for_item__not_craftable(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_workshop_for_item("copper_ore")
-
-def test__get_workshop_for_item__is_fake(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_workshop_for_item("fake")
+def test__get_workshop_for_item_for_item(world_state: WorldState, item, expected, exception):
+    if exception:
+        with pytest.raises(exception):
+            world_state.get_workshop_for_item(item)
+    else:
+        result = world_state.get_workshop_for_item(item)
+        assert result == expected
 
 #get_workshop_location
-def test__get_workshop_locations__real_skill(world_state: WorldState):
-    assert world_state.get_workshop_locations("mining")
+@pytest.mark.parametrize(
+    "skill,expected,exception",
+    [
+        pytest.param("mining", None, None, id="is_skill"),
+        pytest.param("copper_ore", None, KeyError, id="is_not_skill"),
+        pytest.param("chicken", None, KeyError, id="is_monster"),
+        pytest.param("fake", None, KeyError, id="is_fake"),
+    ]
+)
 
-def test__get_workshop_locations__fake_skill(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_workshop_locations("fake")
+def test__get_workshop_locations(world_state: WorldState, skill, expected, exception):
+    if exception:
+        with pytest.raises(exception):
+            world_state.get_workshop_locations(skill)
+    else:
+        assert world_state.get_workshop_locations(skill)
 
 #get_equip_slot_for_item
-def test__get_equip_slot_for_item__is_equipment(world_state: WorldState):
-    assert world_state.get_equip_slot_for_item("copper_pickaxe") == "weapon"
-    
-def test__get_equip_slot_for_item__not_equipment(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_equip_slot_for_item("copper_ore")
-        
-def test__get_equip_slot_for_item__is_fake(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_equip_slot_for_item("fake")
+@pytest.mark.parametrize(
+    "item,expected,exception",
+    [
+        pytest.param("copper_pickaxe", "weapon", None, id="is_equipment"),
+        pytest.param("copper_ore", None, KeyError, id="is_not_equipment"),
+        pytest.param("chicken", None, KeyError, id="is_monster"),
+        pytest.param("fake", None, KeyError, id="is_fake"),
+    ]
+)
+
+def test__get_equip_slot_for_item(world_state: WorldState, item, expected, exception):
+    if exception:
+        with pytest.raises(exception):
+            world_state.get_equip_slot_for_item(item)
+    else:
+        result = world_state.get_equip_slot_for_item(item)
+        assert result == expected
     
 #get_best_tool_for_skill_in_bank
-def test__get_best_tool_for_skill_in_bank(world_state: WorldState):
-    assert False
+@pytest.mark.parametrize(
+    "bank,skill,expected",
+    [
+        pytest.param([], "mining", None, id="bank_empty"),
+        pytest.param({ "copper_pickaxe": 1 }, "mining", ("copper_pickaxe", -10), id="bank_has_tool"),
+        pytest.param({ "copper_pickaxe": 1, "iron_pickaxe": 1 }, "mining", ("iron_pickaxe", -20), id="bank_has_multiple_tools"),
+        pytest.param({ "copper_pickaxe": 1, "iron_pickaxe": 1, "iron_axe": 1 }, "mining", ("iron_pickaxe", -20), id="bank_has_multiple_tools__multiple_skills__mining"),
+        pytest.param({ "copper_pickaxe": 1, "iron_pickaxe": 1, "iron_axe": 1 }, "woodcutting", ("iron_axe", -20), id="bank_has_multiple_tools__multiple_skills__woodcutting"),
+    ]
+)
+
+def test__get_best_tool_for_skill_in_bank(world_state: WorldState, bank, skill, expected):
+    world_state._bank_data = bank
+    result = world_state.get_best_tool_for_skill_in_bank(skill)
+    assert result == expected
     
 #get_best_weapon_for_monster_in_bank
-def test__get_best_weapon_for_monster_in_bank(world_state: WorldState):
-    assert False
+@pytest.mark.parametrize(
+    "bank,monster,expected",
+    [
+        pytest.param({}, "chicken", None, id="bank_empty"),
+        pytest.param({ "copper_pickaxe": 1 }, "chicken", ("copper_pickaxe", 5), id="bank_has_weapon"),
+        pytest.param({ "copper_pickaxe": 1, "mushstaff": 1 }, "chicken", ("mushstaff", 30), id="bank_has_multiple_weapons"),
+        pytest.param({ "fire_staff": 1, "water_bow": 1 }, "cow", ("fire_staff", 16), id="bank_has_multiple_tools__multiple_skills__water_resistence"),
+        pytest.param({ "fire_staff": 1, "water_bow": 1 }, "wolf", ("fire_staff", 17), id="bank_has_multiple_tools__fire_weakness"),
+    ]
+)
+
+def test__get_best_weapon_for_monster_in_bank(world_state: WorldState, bank, monster, expected):
+    world_state._bank_data = bank
+    result = world_state.get_best_weapon_for_monster_in_bank(monster)
+    assert result == expected
     
 # Resource Checkers
 #is_a_resource
-def test__is_a_resource__is_resource(world_state: WorldState):
-    assert world_state.is_a_resource("copper_ore")
+@pytest.mark.parametrize(
+    "resource,expected",
+    [
+        pytest.param("copper_ore", True, id="is_item"),
+        pytest.param("copper_pickaxe", False, id="is_equipment"),
+        pytest.param("chicken", False, id="is_monster"),
+        pytest.param("fake", False, id="is_fake"),
+    ]
+)
 
-def test__is_a_resource__not_resource(world_state: WorldState):
-    assert not world_state.is_a_resource("chicken")
-
-def test__is_a_resource__is_fake(world_state: WorldState):
-    assert not world_state.is_a_resource("fake")
+def test__is_a_resource(world_state: WorldState, resource, expected):
+    result = world_state.is_a_resource(resource)
+    assert result == expected
 
 #get_resource_at_location
-def test__get_resource_at_location__resource_present(world_state: WorldState):
-    assert world_state.get_resource_at_location(-1, 0) == {'apple', 'ash_wood', 'sap'}
-    
-def test__get_resource_at_location__resource_absent(world_state: WorldState):
-    assert world_state.get_resource_at_location(0, 0) is None
-    
-def test__get_resource_at_location__map_out_of_bounds(world_state: WorldState):
-    assert world_state.get_resource_at_location(999, 999) is None
+@pytest.mark.parametrize(
+    "x,y,expected",
+    [
+        pytest.param(-1, 0, {'apple', 'ash_wood', 'sap'}, id="resource_present"),
+        pytest.param(0, 0, None, id="resource_absent"),
+        pytest.param(999, 999, None, id="map_out_of_bounds"),
+    ]
+)
+
+def test__get_resource_at_location(world_state: WorldState, x, y, expected):
+    result = world_state.get_resource_at_location(x, y)
+    assert result == expected
 
 #get_locations_of_resource
-def test__get_locations_of_resource__is_resource(world_state: WorldState):
-    assert world_state.get_locations_of_resource("copper_ore") == {(2, 0)}
-    
-def test__get_locations_of_resource__not_gatherable(world_state: WorldState):
-    assert world_state.get_locations_of_resource("copper_bar") == []
-    
-def test__get_locations_of_resource__not_resource(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_locations_of_resource("copper_helmet")  
-        
-def test__get_locations_of_resource__is_fake(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_locations_of_resource("fake")  
+@pytest.mark.parametrize(
+    "resource,expected,exception",
+    [
+        pytest.param("copper_ore", {(2, 0)}, None, id="is_resource"),
+        pytest.param("copper_bar", [], None, id="not_gatherable"),
+        pytest.param("copper_helmet", None, KeyError, id="not_resource"),
+        pytest.param("fake", None, KeyError, id="is_fake"),
+    ]
+)
+
+def test__get_locations_of_resource(world_state: WorldState, resource, expected, exception):
+    if exception:
+        with pytest.raises(exception):
+            world_state.get_locations_of_resource(resource)
+    else:
+        result = world_state.get_locations_of_resource(resource)
+        assert result == expected
 
 #get_gather_skill_for_resource
-def test__get_gather_skill_for_resource__is_resource(world_state: WorldState):
-    assert world_state.get_gather_skill_for_resource("copper_ore") == "mining"
-    
-def test__get_gather_skill_for_resource__not_resource(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_gather_skill_for_resource("copper_helmet")
-        
-def test__get_gather_skill_for_resource__is_fake(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_gather_skill_for_resource("fake")
+@pytest.mark.parametrize(
+    "resource,expected,exception",
+    [
+        pytest.param("copper_ore", "mining", None, id="is_resource"),
+        pytest.param("copper_helmet", False, KeyError, id="not_resource"),
+        pytest.param("fake", False, KeyError, id="is_fake"),
+    ]
+)
+
+def test__get_gather_skill_for_resource(world_state: WorldState, resource, expected, exception):
+    if exception:
+        with pytest.raises(exception):
+            world_state.get_gather_skill_for_resource(resource)
+    else:
+        result = world_state.get_gather_skill_for_resource(resource)
+        assert result == expected
     
 # Monster Checkers
 #is_a_monster
-def test__is_a_monster__is_monster(world_state: WorldState):
-    assert world_state.is_a_monster("chicken")
+@pytest.mark.parametrize(
+    "monster,expected",
+    [
+        pytest.param("chicken", True, id="is_monster"),
+        pytest.param("copper_ore", False, id="is_item"),
+        pytest.param("copper_pickaxe", False, id="is_equipment"),
+        pytest.param("fake", False, id="is_fake"),
+    ]
+)
 
-def test__is_a_monster__not_monster(world_state: WorldState):
-    assert not world_state.is_a_monster("copper_bar")
-
-def test__is_a_monster__is_fake(world_state: WorldState):
-    assert not world_state.is_a_monster("fake")
+def test__is_a_monster(world_state: WorldState, monster, expected):
+    result = world_state.is_a_monster(monster)
+    assert result == expected
 
 #get_monster_info
-def test__get_monster_info__is_monster(world_state: WorldState):
-    assert world_state.get_monster_info("chicken")
-    
-def test__get_monster_info__not_resource(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_monster_info("copper_ore")
-        
-def test__get_monster_info__is_fake(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_monster_info("fake")
+@pytest.mark.parametrize(
+    "monster,expected,exception",
+    [
+        pytest.param("chicken", True, None, id="is_monster"),
+        pytest.param("copper_ore", False, KeyError, id="is_item"),
+        pytest.param("copper_pickaxe", False, KeyError, id="is_equipment"),
+        pytest.param("fake", None, KeyError, id="is_fake"),
+    ]
+)    
+
+def test__get_monster_info(world_state: WorldState, monster, expected, exception):
+    if exception:
+        with pytest.raises(exception):
+            world_state.get_monster_info(monster)
+    else:
+        result =  world_state.get_monster_info(monster)
+        assert isinstance(result, dict) == expected
 
 #get_monster_at_location
-def test__get_monster_at_location__monster_present(world_state: WorldState):
-    assert world_state.get_monster_at_location(0, 1) == "chicken"
-    
-def test__get_monster_at_location__monster_absent(world_state: WorldState):
-    assert world_state.get_monster_at_location(0, 0) is None
-    
-def test__get_monster_at_location__map_out_of_bounds(world_state: WorldState):
-    assert world_state.get_monster_at_location(999, 999) is None
+@pytest.mark.parametrize(
+    "x,y,expected",
+    [
+        pytest.param(0, 1, "chicken", id="monster_present"),
+        pytest.param(0, 0, None, id="monster_absent"),
+        pytest.param(999, 999, None, id="map_out_of_bounds"),
+    ]
+)
+
+def test__get_monster_at_location(world_state: WorldState, x, y, expected):
+    result = world_state.get_monster_at_location(x, y)
+    assert result == expected
 
 #get_locations_of_monster
-def test__get_locations_of_monster__is_monster(world_state: WorldState):
-    assert world_state.get_locations_of_monster("cow") == {(0, 2)}
+@pytest.mark.parametrize(
+    "monster,expected,exception",
+    [
+        pytest.param("cow", {(0, 2)}, None, id="is_resource"),
+        pytest.param("copper_bar", None, KeyError, id="not_monster"),
+        pytest.param("fake", None, KeyError, id="is_fake"),
+    ]
+)
+
+def test__get_locations_of_monster(world_state: WorldState, monster, expected, exception):
+    if exception:
+        with pytest.raises(exception):
+            world_state.get_locations_of_monster(monster)
+    else:
+        result = world_state.get_locations_of_monster(monster)
+        assert result == expected
     
-def test__get_locations_of_monster__not_monster(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_locations_of_monster("copper_bar")
-        
-def test__get_locations_of_monster_is_fake(world_state: WorldState):
-    with pytest.raises(KeyError):
-        world_state.get_locations_of_monster("fake")  
-    
-    # Bank Checkers
+# Bank Checkers
 def test__get_bank_locations(world_state: WorldState):
     assert world_state.get_bank_locations()
 
