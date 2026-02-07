@@ -2,7 +2,7 @@ from typing import Tuple
 
 from src.action import Action, ActionGroup, ActionConditionExpression, ActionControlNode, ControlOperator
 
-def IF(*branches: Tuple[ActionConditionExpression, ActionGroup], fail_path: Action | ActionGroup) -> ActionControlNode:
+def IF(*branches: Tuple[ActionConditionExpression, ActionGroup], fail_path: Action | ActionGroup | None = None) -> ActionControlNode:
     return ActionControlNode(
         control_operator=ControlOperator.IF ,
         branches=branches,

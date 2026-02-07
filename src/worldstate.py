@@ -89,9 +89,6 @@ class WorldState:
     # Item Checkers
     def is_an_item(self, item: str) -> bool:
         return item in self._item_data
-    
-    def is_equipment(self, item: str) -> bool:
-        return self.is_an_item(item) and not self.get_item_info(item)["type"] == "resource"
             
     def get_item_info(self, item: str) -> Dict:
         if not self.is_an_item(item):
@@ -124,16 +121,23 @@ class WorldState:
         
         raise KeyError(f"{skill} is not a skill.")
     
+    # Equipment Checkers
+    def is_equipment(self, item: str) -> bool:
+        return self.is_an_item(item) and not self.get_item_info(item)["type"] == "resource"
+    
     def get_equip_slot_for_item(self, item: str) -> str:
         if not self.is_equipment(item):
             raise KeyError(f"{item} is not equipment.")
         
         return self._item_data[item]["type"]
     
+    def is_tool(self, item: str) -> bool:
+        return self.is_an_item(item) and self._item_data[item]["subtype"] == "tool"
+    
     def get_best_tool_for_skill_in_bank(self, skill: str) -> Tuple[str, int] | None:
         tools = [
             item for item in self._bank_data 
-            if self._item_data[item]["subtype"] == "tool"
+            if self.is_tool(item)
             and any(effect["code"] == skill for effect in self._item_data[item]["effects"])
         ]
 
@@ -147,41 +151,145 @@ class WorldState:
         else:
             return None
         
+    def get_gather_power_of_tool(self, tool: str, skill: str) -> int:
+        if not self.is_equipment(tool):
+            raise KeyError(f"{tool} is not equipment.")
+
+        power = [effect["value"] for effect in self._item_data[tool]["effects"] if effect["code"] == skill]
+        if len(power) > 0:
+            return power[0]
+        else:
+            return 0
+        
+    def is_weapon(self, item: str) -> bool:
+        return self.is_an_item(item) and self._item_data[item]["type"] == "weapon"
+        
     def get_best_weapon_for_monster_in_bank(self, monster: str) -> Tuple[str, int] | None:
         weapons = [
             item for item in self._bank_data 
-            if self._item_data[item]["type"] == "weapon"
+            if self.is_weapon(item)
         ]
 
         if len(weapons) > 0:
-            monster_data = self._monster_data[monster]
-            weapon_damage = []
-            for weapon in weapons:
-                air = 0
-                water = 0
-                earth = 0
-                fire = 0
-
-                for effect in self._item_data[weapon]["effects"]:
-                    match effect["code"]:
-                        case "attack_air":
-                            air = floor(effect["value"] * (1 + int(monster_data["res_air"]) / 100))
-
-                        case "attack_water":
-                            water = floor(effect["value"] * (1 + int(monster_data["res_air"]) / 100))
-
-                        case "attack_earth":
-                            earth = floor(effect["value"] * (1 + int(monster_data["res_air"]) / 100))
-
-                        case "attack_fire":
-                            fire = floor(effect["value"] * (1 + int(monster_data["res_air"]) / 100))
-
-                weapon_damage.append((weapon, air + water + earth + fire))
-
+            weapon_damage = [(weapon, self.get_attack_power_of_weapon(weapon, monster)) for weapon in weapons]
             best_weapon = max(weapon_damage, key=lambda w: w[1])
             return best_weapon
         else:
+            return (None, 0)
+        
+    def get_attack_power_of_weapon(self, weapon: str, monster: str) -> int:
+        if not self.is_equipment(weapon):
+            raise KeyError(f"{weapon} is not equipment.")
+        
+        monster_data = self._monster_data[monster]
+        weapon_data = self.get_item_info(weapon)
+
+        power = 0
+        crit_chance = 0
+        crit_damage_mult = 1.5
+
+        for effect in weapon_data["effects"]:
+            match effect["code"]:
+                case "attack_air":
+                    power += floor(effect["value"] / (1 + int(monster_data["res_air"]) / 100))
+
+                case "attack_water":
+                    power += floor(effect["value"] / (1 + int(monster_data["res_water"]) / 100))
+
+                case "attack_earth":
+                    power += floor(effect["value"] / (1 + int(monster_data["res_earth"]) / 100))
+
+                case "attack_fire":
+                    power += floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
+
+                case "critical_strike":
+                    crit_chance = effect["value"] / 100
+
+        power += (power * crit_damage_mult * crit_chance)
+        return power
+        
+    def is_armour(self, item: str) -> bool:
+        return self.is_an_item(item) and self._item_data[item]["type"] in ARMOUR_SLOTS
+        
+    def get_best_armour_for_monster_in_bank(self, monster: str) -> Dict[str, Tuple[str, int]] | None:
+        armours = [
+            item for item in self._bank_data 
+            if self.is_armour(item)
+        ]
+
+        if len(armours) > 0:
+            armour_choices = {
+                "helmet": [],
+                "shield": [],
+                "body_armour": [],
+                "leg_armour": [],
+                "boots": []
+            }
+            
+            for armour in armours:
+                armour_data = self.get_item_info(armour)
+                armour_type = armour_data["type"]
+                def_power = self.get_defence_power_of_armour(armour, monster)
+                armour_choices[armour_type].append((armour, def_power))
+
+            for k, v in armour_choices.items():
+                if len(v) > 0:
+                    armour_choices[k] = max(v, key=lambda a: a[1])
+
+            return armour_choices
+        else:
             return None
+        
+    def get_defence_power_of_armour(self, armour: str, monster: str) -> int:
+        if not self.is_equipment(armour):
+            raise KeyError(f"{armour} is not equipment.")
+        
+        monster_data = self._monster_data[monster]
+        armour_data = self.get_item_info(armour)
+
+        def_power = 0
+        dmg_bonus = 1
+        wisdom = 0
+
+        for effect in armour_data["effects"]:
+            match effect["code"]:
+                case "hp":
+                    def_power += effect["value"]
+
+                case "dmg":
+                    dmg_bonus += effect["value"]
+                    
+                case "res_air":
+                    def_power += (1 + effect["value"] / 100) * int(monster_data["attack_air"])
+
+                case "res_water":
+                    def_power += (1 + effect["value"] / 100) * int(monster_data["attack_water"])
+
+                case "res_earth":
+                    def_power += (1 + effect["value"] / 100) * int(monster_data["attack_earth"])
+
+                case "res_fire":
+                    def_power += (1 + effect["value"] / 100) * int(monster_data["attack_fire"])
+
+                case "attack_air":
+                    def_power += effect["value"] / 100
+
+                case "attack_water":
+                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_water"]) / 100))
+
+                case "attack_earth":
+                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_earth"]) / 100))
+
+                case "attack_fire":
+                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
+
+                case "wisdom":
+                    wisdom = floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
+
+                case _:
+                    raise Exception("wtf is this")
+
+        return def_power
     
     # Resource Checkers
     def is_a_resource(self, resource: str) -> bool:
@@ -266,4 +374,8 @@ class WorldState:
             for r in reservation:
                 amount_reserved += r["quantity"] if r["code"] == item else 0
 
-        return amount_reserved  
+        return amount_reserved
+    
+    # Other Checkers
+    def get_task_master_locations(self) -> List[Tuple[int, int]]:
+        return self._interactions.tasks_masters

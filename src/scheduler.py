@@ -186,7 +186,7 @@ class ActionScheduler:
 
                 return result
                 
-    def _evaluate_control_branches(self, agent: CharacterAgent, control_node: ActionControlNode) -> Action | ActionGroup:
+    def _evaluate_control_branches(self, agent: CharacterAgent, control_node: ActionControlNode) -> Action | ActionGroup | ActionControlNode | None:
         for branch in control_node.branches:
             if self._evaluate_condition(agent, branch[0]):
                 return branch[1]
@@ -223,7 +223,7 @@ class ActionScheduler:
                     needed_space = 0
                     for item in items:
                         needed_quantity = item["quantity"]
-                        current_quantity = agent.get_quantity_of_item_in_inventory(item["item"])
+                        current_quantity = agent.get_quantity_of_item_in_inventory(item["code"])
                         needed_space += needed_quantity - current_quantity
 
                     condition_met = agent.inventory_has_available_space(needed_space)

@@ -141,10 +141,10 @@ async def main():
 
     # Run some starting commands
     parse_input(planner, scheduler, world_state, "Cameron craft-or-gather ash_plank max")
-    parse_input(planner, scheduler, world_state, "Maett craft-or-gather copper_bar max")
-    parse_input(planner, scheduler, world_state, "Oscar craft-or-gather cooked_gudgeon max")
-    parse_input(planner, scheduler, world_state, "Jayne gather-forever sunflower")
-    parse_input(planner, scheduler, world_state, "Moira gather-forever sunflower")
+    #parse_input(planner, scheduler, world_state, "Maett craft-or-gather copper_bar max")
+    #parse_input(planner, scheduler, world_state, "Oscar craft-or-gather cooked_gudgeon max")
+    parse_input(planner, scheduler, world_state, "Jayne craft-or-gather copper_bar max")
+    parse_input(planner, scheduler, world_state, "Moira craft-or-gather cooked_gudgeon max")
 
     while True:
         c = await asyncio.to_thread(input, "Enter Command: ")
@@ -303,14 +303,10 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: World
                     print("not a monster")
                     return
                 
-                move_prev = False
-                fight_plan = planner.plan(ActionIntent(Intention.FIGHT_THEN_REST, monster=args[0], until=cond(ActionCondition.INVENTORY_FULL)))
-            else:
-                move_prev = True
-                fight_plan = planner.plan(ActionIntent(Intention.FIGHT_THEN_REST, until=cond(ActionCondition.INVENTORY_FULL)))
+            fight_plan = planner.plan(ActionIntent(Intention.FIGHT_THEN_REST, monster=args[0], until=cond(ActionCondition.INVENTORY_FULL)))
 
             node = action_group(                
-                planner.plan(ActionIntent(Intention.PREPARE_FOR_FIGHTING, move_prev=move_prev)),
+                planner.plan(ActionIntent(Intention.PREPARE_FOR_FIGHTING, monster=args[0])),
                 action_group(
                     fight_plan,
                     planner.plan(ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
@@ -375,6 +371,17 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: World
                     raise Exception("Invalid quantity argument.")
                 
                 scheduler.queue_action_node(character_name, node)
+
+        case 'complete-tasks':
+            if len(args) != 1:
+                return
+            
+            if args[0] == "monsters":
+                node = planner.plan(ActionIntent(Intention.COMPLETE_TASKS, type="monsters"))
+            elif args[0] == "items":
+                node = planner.plan(ActionIntent(Intention.COMPLETE_TASKS, type="items"))
+
+            scheduler.queue_action_node(character_name, node)
 
 if __name__ == '__main__':
     asyncio.run(main())

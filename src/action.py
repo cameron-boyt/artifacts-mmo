@@ -85,9 +85,6 @@ class ActionControlNode:
             # There must be at least one branch
             assert(self.branches and len(self.branches) > 0)
 
-            # There must be a fail_path defined
-            assert(self.fail_path)
-
             # There should be no child control_node or until condition defined
             assert(self.control_node is None)
             assert(self.until is None)

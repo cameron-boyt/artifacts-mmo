@@ -17,6 +17,7 @@ class RequestOutcomeDetail(Enum):
     INVALID_PAYLOAD = auto()
     MISSING_REQUIRED_ITEMS = auto()
     ALREADY_AT_DESTINATION = auto()
+    ALREADY_HAS_TASK = auto()
     LEVEL_TOO_LOW = auto()
     INVENTORY_FULL = auto()
     ON_COOLDOWN = auto()
@@ -207,6 +208,12 @@ class APIClient:
                 self.logger.error("Character missing required items for action.")
                 outcome = RequestOutcome.FAIL
                 detail = RequestOutcomeDetail.MISSING_REQUIRED_ITEMS
+
+            case 489:
+                # Character already has task
+                self.logger.warning("Character already has task.")
+                outcome = RequestOutcome.FAIL
+                detail = RequestOutcomeDetail.ALREADY_HAS_TASK
 
             case 490:
                 # Character already at destination

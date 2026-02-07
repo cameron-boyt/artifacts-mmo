@@ -36,6 +36,8 @@ class ItemQuantity:
 
         if not self.min:
             self.min = -math.inf
+        
+ARMOUR_SLOTS = ["shield", "helmet", "body_armor", "leg_armor", "boots"]
 
 class ItemSlot(Enum):
     WEAPON = "weapon"

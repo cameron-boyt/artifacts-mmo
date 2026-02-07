@@ -211,6 +211,15 @@ class CharacterAgent:
                         return ActionOutcome.FAIL
                     
                     x, y = loc
+                elif action.params.get("on_task", False):
+                    task = self.char_data["task"]
+                    if self.char_data["task_type"] == "monsters":
+                        locations = self.world_state.get_locations_of_monster(task)
+                    elif self.char_data["task_type"] == "resources":
+                        locations = self.world_state.get_locations_of_resource(task)
+                
+                    loc = self._get_closest_location(locations)
+                    x, y = loc
                 else:
                     x = action.params["x"]
                     y = action.params["y"]
@@ -232,13 +241,19 @@ class CharacterAgent:
             ## GATHERING ##
             case CharacterAction.GATHER:
                 resource = self.world_state.get_resource_at_location(self.char_data["x"], self.char_data["y"])
-                resource_data = self.world_state.get_data_for_resource(resource)
-                resource_skill = resource_data["skill"]
-                resource_level = resource_data["level"]
-                charcter_skill_level = self.char_data[f"{resource_skill}_level"]
-                if charcter_skill_level < resource_level:
-                    self.logger.warning(f"[{self.name}] Skill '{resource_skill}' level (charcter_skill_level) insufficient to gather {resource} ({resource_level}).")
-                    return ActionOutcome.FAIL
+
+                for r in resource:
+                    r_data = self.world_state.get_item_info(r)
+                    
+                    if not "skill" in r_data:
+                        continue
+
+                    r_skill = r_data["skill"]
+                    r_level = r_data["level"]
+                    charcter_skill_level = self.char_data[f"{r_skill}_level"]
+                    if charcter_skill_level < r_level:
+                        self.logger.warning(f"[{self.name}] Skill '{r_skill}' level (charcter_skill_level) insufficient to gather {resource} ({r_level}).")
+                        return ActionOutcome.FAIL
                 
                 api_result = await self.api_client.gather(self.name)
         
@@ -261,11 +276,15 @@ class CharacterAgent:
 
                 match action.params.get("preset", "none"):
                     case "gathering":
-                        if skill := action.params.get("sub_preset"):
+                        if on_task := action.params.get("on_task", False): 
+                            resource = self.char_data["task"]
+                            skill = self.world_state.get_gather_skill_for_resource(task)
+
+                        if on_task or (skill := action.params.get("sub_preset")):
                             if best_tool := self.world_state.get_best_tool_for_skill_in_bank(skill):
                                 # If current tool is same or better, don't bother withdrawing
                                 equipped_item = self.char_data["weapon_slot"]
-                                if self.world_state.get_gathering_skill_of_item(equipped_item, skill) <= best_tool[1]:
+                                if self.world_state.get_gather_power_of_tool(equipped_item, skill) <= best_tool[1]:
                                     self.context["last_withdrawn"] = []
                                     return ActionOutcome.CANCEL
 
@@ -277,11 +296,35 @@ class CharacterAgent:
                             return ActionOutcome.CANCEL
                             
                     case "fighting":
-                        monster = action.params.get("sub_preset", "generic")
+                        if on_task := action.params.get("on_task", False): 
+                            monster = self.char_data["task"]
+                        else:    
+                            monster = action.params.get("sub_preset")
+
+                        items_to_withdraw = []
+                        self.context["last_withdrawn"] = []
+
                         if best_weapon := self.world_state.get_best_weapon_for_monster_in_bank(monster):
-                            items_to_withdraw = [{ "code": best_weapon, "quantity": 1 }]
-                            self.context["last_withdrawn"] = items_to_withdraw
+                            # If current weapon is same or better, don't bother withdrawing
+                            equipped_item = self.char_data["weapon_slot"]
+                            if not equipped_item or (equipped_item and self.world_state.get_attack_power_of_weapon(equipped_item, monster) < best_weapon[1]):
+                                items_to_withdraw.extend([{ "code": best_weapon[0], "quantity": 1 }])
+
+                        if best_armour := self.world_state.get_best_armour_for_monster_in_bank(monster):
+                            for armour_type, armour in best_armour.items():
+                                if armour:
+                                    # If current armour is same or better, don't bother withdrawing
+                                    equipped_item = self.char_data[f"{armour_type}_slot"]
+                                    if not equipped_item or (equipped_item and self.world_state.get_defence_power_of_armour(equipped_item, monster) < armour[1]):
+                                        items_to_withdraw.extend([{ "code": armour[0], "quantity": 1 }])
+                                        
+                        # Contextually set the armour and weapons to be equipped
+                        self.context["last_withdrawn"] = items_to_withdraw
                         
+                        # Get food to withdraw
+                        ##
+                        ##
+
                         if not items_to_withdraw:
                             self.context["last_withdrawn"] = []
                             return ActionOutcome.CANCEL
@@ -323,14 +366,17 @@ class CharacterAgent:
                         if not last_withdraw:
                             return ActionOutcome.CANCEL
                         
-                        item_code = last_withdraw[0]["code"]
-                        item_slot = self.world_state.get_equip_slot_for_item(item_code)
+                        for item in last_withdraw:
+                            item_code = item["code"]
+                            item_slot = self.world_state.get_equip_slot_for_item(item_code)
+                            api_result = await self.api_client.equip(self.name, item_code, item_slot)
+                            if api_result.outcome != RequestOutcome.SUCCESS:
+                                break
 
                     case _:
                         item_code = action.params.get("item")
                         item_slot = action.params.get("slot")
-
-                api_result = await self.api_client.equip(self.name, item_code, item_slot)
+                        api_result = await self.api_client.equip(self.name, item_code, item_slot)
 
             case CharacterAction.UNEQUIP:
                 item_slot = action.params.get("slot")
@@ -348,7 +394,7 @@ class CharacterAgent:
                     required_materials = self.world_state.get_crafting_materials_for_item(item)
                     for inv_item in self.char_data["inventory"]:
                         for req_item in required_materials:
-                            if inv_item["code"] == req_item["item"]:
+                            if inv_item["code"] == req_item["code"]:
                                 lowest_multiple = min(lowest_multiple, inv_item["quantity"] // req_item["quantity"])
 
                     quantity = lowest_multiple
