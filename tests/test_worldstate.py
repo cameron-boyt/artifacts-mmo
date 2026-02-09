@@ -301,10 +301,9 @@ def test__get_best_armour_for_monster_in_bank(world_state: WorldState, bank, mon
     result = world_state.get_best_armour_for_monster_in_bank(monster)
     assert result[0] == expected
 
-
 #get_defence_power_of_armour
 @pytest.mark.parametrize(
-    "weapon,monster,expected,exception",
+    "armour,monster,expected,exception",
     [
         pytest.param("copper_pickaxe", "chicken", 5, None, id="weapon_against_normal_enemy"),
         pytest.param("copper_pickaxe", "cow", 7, None, id="weapon_against_weak_enemy"),
@@ -313,12 +312,63 @@ def test__get_best_armour_for_monster_in_bank(world_state: WorldState, bank, mon
     ]
 )
 
-def test__get_defence_power_of_armour(world_state: WorldState, weapon, monster, expected, exception):
+def test__get_defence_power_of_armour(world_state: WorldState, armour, monster, expected, exception):
     if exception:
         with pytest.raises(exception):
-            world_state.get_defence_power_of_armour(weapon, monster)
+            world_state.get_defence_power_of_armour(armour, monster)
     else:
-        result = world_state.get_defence_power_of_armour(weapon, monster)
+        result = world_state.get_defence_power_of_armour(armour, monster)
+        assert result == expected
+
+#is_food
+@pytest.mark.parametrize(
+    "item,expected",
+    [
+        pytest.param("cooked_gudgeon", True, id="is_food"),
+        pytest.param("small_health_potion", False, id="is_consumable"),
+        pytest.param("chicken", False, id="is_monster"),
+        pytest.param("fake", False, id="is_fake"),
+    ]
+)
+
+def test__is_food(world_state: WorldState, item, expected):
+    result = world_state.is_food(item)
+    assert result == expected
+    
+#get_best_food_for_character_in_bank
+@pytest.mark.parametrize(
+    "bank,max_hp,expected",
+    [
+        pytest.param({}, 100, None, id="bank_empty"),
+        pytest.param({ "cooked_gudgeon": 1 }, 100, "cooked_gudgeon", id="one_food_in_bank"),
+        pytest.param({ "cooked_swordfish": 1 }, 100, "cooked_swordfish", id="one_food_in_bank__heals_more_than_max_hp"),
+        pytest.param({ "cooked_gudgeon": 1, "cooked_chicken": 1 }, 100, "cooked_chicken", id="multiple_food_in_bank"),
+        pytest.param({ "cooked_gudgeon": 1, "cooked_swordfish": 1 }, 100, "cooked_gudgeon", id="multiple_food_in_bank__heals_more_than_max_hp"),
+    ]
+)
+
+def test__get_best_food_for_character_in_bank(world_state: WorldState, bank, max_hp, expected):
+    world_state._bank_data = bank
+    result = world_state.get_best_food_for_character_in_bank(max_hp)
+    assert result[0] == expected
+
+#get_heal_power_of_food
+@pytest.mark.parametrize(
+    "food,expected,exception",
+    [
+        pytest.param("cooked_gudgeon", 75, None, id="is_food"),
+        pytest.param("small_health_potion", None, KeyError, id="is_consumable"),
+        pytest.param("copper_pickaxe", None, KeyError, id="is_tool"),
+        pytest.param("fake", None, KeyError, id="is_fake"),
+    ]
+)
+
+def test__get_heal_power_of_food(world_state: WorldState, food, expected, exception):
+    if exception:
+        with pytest.raises(exception):
+            world_state.get_heal_power_of_food(food)
+    else:
+        result = world_state.get_heal_power_of_food(food)
         assert result == expected
 
 # Resource Checkers

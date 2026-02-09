@@ -37,6 +37,7 @@ class ActionCondition(Enum):
     BANK_HAS_ITEM_OF_QUANTITY = auto()
     INVENTORY_HAS_ITEM_OF_QUANTITY = auto()
     BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY = auto()
+    ITEMS_IN_LAST_WITHDRAW_CONTEXT = auto()
     HAS_TASK = auto()
     HAS_TASK_OF_TYPE = auto()
     TASK_COMPLETE = auto()

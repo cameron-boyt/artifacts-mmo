@@ -179,7 +179,7 @@ class ActionPlanner:
                 elif task_type == "items":
                     return action_group(
                         IF(
-                            (not(cond(ActionCondition.HAS_TASK)), action_group(
+                            (NOT(cond(ActionCondition.HAS_TASK)), action_group(
                                 move(closest_of=task_master_locations.get("items")),
                                 get_task()
                             ))
@@ -220,51 +220,49 @@ class ActionPlanner:
             case Intention.PREPARE_FOR_GATHERING:
                 bank_locations = self.world_state.get_bank_locations()
                 if intent.params.get("on_task", False):
-                    return action_group(
-                        move(closest_of=bank_locations),
-                        bank_all_items(),
-                        action_group(
-                            bank_withdraw_item(preset=f"gathering", on_task=True),
-                            equip(context="last_withdrawn"),
-                            bank_all_items()
-                        ) 
-                    )
+                    bank_withdraw_action = bank_withdraw_item(preset=f"gathering", on_task=True)
                 else:
                     resource = intent.params.get("resource")
                     skill = self.world_state.get_gather_skill_for_resource(resource)
-                    return action_group(
-                        move(closest_of=bank_locations),
-                        bank_all_items(),
-                        action_group(
-                            bank_withdraw_item(preset=f"gathering", sub_preset=skill),
-                            equip(context="last_withdrawn"),
-                            bank_all_items()
-                        ) 
-                    )
+                    bank_withdraw_action = bank_withdraw_item(preset=f"gathering", sub_preset=skill)
+
+                return action_group(
+                    move(closest_of=bank_locations), 
+                    bank_all_items(),
+                    action_group(
+                        bank_withdraw_action,
+                        REPEAT(
+                            IF((cond(ActionCondition.ITEMS_IN_LAST_WITHDRAW_CONTEXT), equip(context="last_withdrawn"))),
+                            until=NOT(cond(ActionCondition.ITEMS_IN_LAST_WITHDRAW_CONTEXT))
+                        ),
+                        bank_all_items()
+                    ) 
+                )
 
             case Intention.PREPARE_FOR_FIGHTING:
                 bank_locations = self.world_state.get_bank_locations()
                 if intent.params.get("on_task", False):
-                    return action_group(
-                        move(closest_of=bank_locations),
-                        bank_all_items(),
-                        action_group(
-                            bank_withdraw_item(preset=f"fighting", on_task=True),
-                            equip(context="last_withdrawn"),
-                            bank_all_items()
-                        ) 
-                    )
+                    bank_withdraw_action_gear = bank_withdraw_item(preset=f"fighting", on_task=True)
                 else:
                     monster = intent.params.get("monster")
-                    return action_group(
-                        move(closest_of=bank_locations),
+                    bank_withdraw_action_gear = bank_withdraw_item(preset=f"fighting", sub_preset=monster)
+
+                item_order = ItemOrder(items=[ItemSelection(item_type=ItemType.FOOD, quantity=ItemQuantity(max=20))])
+                bank_withdraw_action_food = bank_withdraw_item(items=item_order)
+
+                return action_group(
+                    move(closest_of=bank_locations),
+                    bank_all_items(),
+                    action_group(
+                        bank_withdraw_action_gear,
+                        REPEAT(
+                            IF((cond(ActionCondition.ITEMS_IN_LAST_WITHDRAW_CONTEXT), equip(context="last_withdrawn"))),
+                            until=NOT(cond(ActionCondition.ITEMS_IN_LAST_WITHDRAW_CONTEXT))
+                        ),
                         bank_all_items(),
-                        action_group(
-                            bank_withdraw_item(preset=f"fighting", sub_preset=monster),
-                            equip(context="last_withdrawn"),
-                            bank_all_items()
-                        ) 
-                    )
+                        bank_withdraw_action_food
+                    ) 
+                )
 
             case Intention.FIGHT_THEN_REST:
                 if intent.params.get("on_task", False):

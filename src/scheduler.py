@@ -243,6 +243,9 @@ class ActionScheduler:
                     quantity = expression.parameters["quantity"]
                     condition_met = agent.bank_and_inventory_have_item_of_quantity(item, quantity)
 
+                case ActionCondition.ITEMS_IN_LAST_WITHDRAW_CONTEXT:
+                    condition_met = agent.items_in_last_withdraw_context()
+
                 case ActionCondition.HAS_TASK:
                     condition_met = agent.has_task()
 

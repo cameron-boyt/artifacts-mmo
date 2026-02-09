@@ -238,7 +238,7 @@ class WorldState:
 
             return armour_choices
         else:
-            return None
+            return {}
         
     def get_defence_power_of_armour(self, armour: str, monster: str) -> int:
         if not self.is_equipment(armour):
@@ -290,6 +290,36 @@ class WorldState:
                     raise Exception("wtf is this")
 
         return def_power
+        
+    def is_food(self, item: str) -> bool:
+        return self.is_an_item(item) and self._item_data[item]["subtype"] == "food"
+    
+    def get_best_food_for_character_in_bank(self, max_hp: int) -> str | None:
+        foods = [
+            item for item in self._bank_data 
+            if self.is_food(item)
+        ]
+
+        if len(foods) > 0:
+            food_power = []
+            for food in foods:
+                heal_power = self.get_heal_power_of_food(food)
+                food_power.append((food, heal_power))
+
+            best_food = max(food_power, key=lambda f: f[1] if f[1] < max_hp else -1 * f[1])
+            return best_food
+        else:
+            return (None, 0)
+        
+    def get_heal_power_of_food(self, food: str) -> int:
+        if not self.is_food(food):
+            raise KeyError(f"{food} is not equipment.")
+        
+        food_data = self.get_item_info(food)
+
+        # There should always be a heal effect, so this is safe
+        heal_amount = [effect for effect in food_data["effects"] if effect["code"] == "heal"][0]["value"]
+        return heal_amount
     
     # Resource Checkers
     def is_a_resource(self, resource: str) -> bool:

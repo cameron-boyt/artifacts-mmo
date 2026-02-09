@@ -11,10 +11,24 @@ class ItemOrder:
     greedy_order: bool = False
     check_inv: bool = False
 
+class ItemType(Enum):
+    FOOD = auto()
+
 @dataclass
 class ItemSelection:
-    item: str
     quantity: ItemQuantity
+    item: str | None = None
+    item_type: ItemType | None = None
+
+    def __post_init__(self):
+        # Only allow item xor item_type
+        assert(self.item or self.item_type)
+
+        if self.item:
+            assert(not self.item_type)
+
+        if self.item_type:
+            assert(not self.item)
 
 @dataclass
 class ItemQuantity:

@@ -53,27 +53,27 @@ def test__get_closest_location(agent: CharacterAgent, start, locations, expected
 #_construct_item_list
 def order_single_exact(code: str, qty: int, greedy=False, check_inv=False):
     return ItemOrder(
-        items=[ItemSelection(code, ItemQuantity(min=qty, max=qty))],
+        items=[ItemSelection(item=code, quantity=ItemQuantity(min=qty, max=qty))],
         greedy_order=greedy,
         check_inv=check_inv,
     )
 
 def order_single_range(code: str, min_q: int | None, max_q: int | None, check_inv=False):
     return ItemOrder(
-        items=[ItemSelection(code, ItemQuantity(min=min_q, max=max_q))],
+        items=[ItemSelection(item=code, quantity=ItemQuantity(min=min_q, max=max_q))],
         check_inv=check_inv,
     )
 
 def order_single_multiple_of(code: str, min_q: int | None, max_q: int | None, multiple_of: int, check_inv=False):
     return ItemOrder(
-        items=[ItemSelection(code, ItemQuantity(min=min_q, max=max_q, multiple_of=multiple_of))],
+        items=[ItemSelection(item=code, quantity=ItemQuantity(min=min_q, max=max_q, multiple_of=multiple_of))],
         check_inv=check_inv,
     )
 
 def order_multi(items: list[tuple[str, ItemQuantity]], greedy=False, check_inv=False) -> ItemOrder:
     """Helper to define multi-item orders compactly in test cases."""
     return ItemOrder(
-        items=[ItemSelection(code, qty) for code, qty in items],
+        items=[ItemSelection(item=code, quantity=qty) for code, qty in items],
         greedy_order=greedy,
         check_inv=check_inv,
     )
@@ -494,5 +494,34 @@ def test__bank_and_inventory_have_item_of_quantity(agent: CharacterAgent, inv, b
     set_inv(agent, inv)
     set_bank(agent, bank)
     result = agent.bank_and_inventory_have_item_of_quantity(item, quantity)
+    assert result == expected
+
+#has_task
+@pytest.mark.parametrize(
+    "task,expected",
+    [
+        pytest.param("chicken", True, id="has_task"),
+        pytest.param("", False, id="no_task"),
+    ]
+)
+
+def test__has_task(agent: CharacterAgent, task, expected):
+    agent.char_data["task"] = task
+    result = agent.has_task()
+    assert result == expected
+    
+#items_in_last_withdraw_context
+@pytest.mark.parametrize(
+    "context,expected",
+    [
+        pytest.param({}, False, id="not_defined"),
+        pytest.param({ "last_withdrawn": [] }, False, id="no_withdrawals"),
+        pytest.param({ "last_withdrawn": [{ "code": "copper_helmet", "quantity": 1 }] }, True, id="has_withdrawals"),
+    ]
+)
+
+def test__items_in_last_withdraw_context(agent: CharacterAgent, context, expected):
+    agent.context = context
+    result = agent.items_in_last_withdraw_context()
     assert result == expected
     

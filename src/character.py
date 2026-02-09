@@ -57,6 +57,13 @@ class CharacterAgent:
 
         free_inv_spaces = self.get_free_inventory_spaces()
 
+        # Resolve any ItemType items
+        for item in order.items:
+            if item.item_type:
+                match item.item_type:
+                    case ItemType.FOOD:
+                        self.world_state.get_best_food_for_character(self)
+
         for item in order.items:
             i = item.item
             inv[i] = self.get_quantity_of_item_in_inventory(i)
@@ -192,6 +199,9 @@ class CharacterAgent:
     def has_task(self) -> bool:
         return self.char_data["task"] != ""
     
+    def items_in_last_withdraw_context(self) -> bool:
+        last_withdrawn_items = self.context.get("last_withdrawn", [])
+        return len(last_withdrawn_items) > 0
 
     ## Action Performance
     async def perform(self, action: Action) -> ActionOutcome:
@@ -320,10 +330,6 @@ class CharacterAgent:
                                         
                         # Contextually set the armour and weapons to be equipped
                         self.context["last_withdrawn"] = items_to_withdraw
-                        
-                        # Get food to withdraw
-                        ##
-                        ##
 
                         if not items_to_withdraw:
                             self.context["last_withdrawn"] = []
@@ -331,7 +337,6 @@ class CharacterAgent:
                     case _:
                         # Construct a list of items that need to be withdrawn
                         item_order = action.params.get("items")
-
                         items_to_withdraw = self._construct_item_list(item_order)
 
                 # Clean up item withdrawals
@@ -366,17 +371,15 @@ class CharacterAgent:
                         if not last_withdraw:
                             return ActionOutcome.CANCEL
                         
-                        for item in last_withdraw:
-                            item_code = item["code"]
-                            item_slot = self.world_state.get_equip_slot_for_item(item_code)
-                            api_result = await self.api_client.equip(self.name, item_code, item_slot)
-                            if api_result.outcome != RequestOutcome.SUCCESS:
-                                break
+                        item = last_withdraw.pop()
+                        item_code = item["code"]
+                        item_slot = self.world_state.get_equip_slot_for_item(item_code)
 
                     case _:
                         item_code = action.params.get("item")
                         item_slot = action.params.get("slot")
-                        api_result = await self.api_client.equip(self.name, item_code, item_slot)
+                        
+                api_result = await self.api_client.equip(self.name, item_code, item_slot)
 
             case CharacterAction.UNEQUIP:
                 item_slot = action.params.get("slot")
