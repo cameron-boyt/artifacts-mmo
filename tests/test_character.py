@@ -395,6 +395,18 @@ def test__get_quantity_of_item_in_inventory(agent: CharacterAgent, inv, item, ex
     result = agent.get_quantity_of_item_in_inventory(item)
     assert result == expected
 
+#set_abort_actions
+def test__set_abort_actions(agent: CharacterAgent):
+    agent.abort_actions = False
+    agent.set_abort_actions()
+    assert agent.abort_actions == True
+
+#unset_abort_actions()
+def test__unset_abort_actions(agent: CharacterAgent):
+    agent.abort_actions = True
+    agent.unset_abort_actions()
+    assert agent.abort_actions == False
+
 ## Condition Checkers
 #inventory_full
 @pytest.mark.parametrize(
@@ -481,12 +493,12 @@ def test__bank_has_item_of_quantity(agent: CharacterAgent, bank, item, quantity,
     "inv,bank,item,quantity,expected",
     [
         pytest.param({}, {}, "copper_ore", 10, False, id="both_empty"),
-        pytest.param({}, { "cooper_ore": 3 }, "copper_ore", 10, False, id="bank_empty__inv_insufficient"),
-        pytest.param({ "cooper_ore": 3 }, {}, "copper_ore", 10, False, id="bank_insufficient__inv_empty"),
-        pytest.param({ "cooper_ore": 3 }, { "cooper_ore": 5 }, "copper_ore", 10, False, id="both_insufficient__total_insufficient"),
-        pytest.param({ "cooper_ore": 6 }, { "cooper_ore": 5 }, "copper_ore", 10, False, id="both_insufficient__total_sufficient"),
-        pytest.param({}, { "cooper_ore": 11 }, "copper_ore", 10, False, id="bank_sufficient"),
-        pytest.param({ "cooper_ore": 11 }, {}, "copper_ore", 10, False, id="inv_sufficient"),
+        pytest.param({}, { "copper_ore": 3 }, "copper_ore", 10, False, id="bank_empty__inv_insufficient"),
+        pytest.param({ "copper_ore": 3 }, {}, "copper_ore", 10, False, id="bank_insufficient__inv_empty"),
+        pytest.param({ "copper_ore": 3 }, { "copper_ore": 5 }, "copper_ore", 10, False, id="both_insufficient__total_insufficient"),
+        pytest.param({ "copper_ore": 6 }, { "copper_ore": 5 }, "copper_ore", 10, True, id="both_insufficient__total_sufficient"),
+        pytest.param({}, { "copper_ore": 11 }, "copper_ore", 10, True, id="bank_sufficient"),
+        pytest.param({ "copper_ore": 11 }, {}, "copper_ore", 10, True, id="inv_sufficient"),
     ]
 )
 

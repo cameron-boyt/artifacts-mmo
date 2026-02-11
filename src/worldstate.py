@@ -142,11 +142,8 @@ class WorldState:
         ]
 
         if len(tools) > 0:
-            best_tool = min([
-                (tool, [effect["value"] for effect in self._item_data[tool]["effects"] if effect["code"] == skill][0])
-                for tool in tools
-            ], key=lambda t: t[1])
-
+            tool_power = [(tool, self.get_gather_power_of_tool(tool, skill)) for tool in tools]
+            best_tool = max(tool_power, key=lambda t: t[1])
             return best_tool
         else:
             return None
@@ -157,7 +154,9 @@ class WorldState:
 
         power = [effect["value"] for effect in self._item_data[tool]["effects"] if effect["code"] == skill]
         if len(power) > 0:
-            return power[0]
+            # Invert the value because tool power is stored in terms of "cooldown reduction" as as negative int.
+            # -10 is worse than -20, so we need to turn the power postitive
+            return power[0] * -1
         else:
             return 0
         
@@ -175,7 +174,7 @@ class WorldState:
             best_weapon = max(weapon_damage, key=lambda w: w[1])
             return best_weapon
         else:
-            return (None, 0)
+            return None
         
     def get_attack_power_of_weapon(self, weapon: str, monster: str) -> int:
         if not self.is_equipment(weapon):
@@ -314,10 +313,11 @@ class WorldState:
                 heal_power = self.get_heal_power_of_food(food)
                 food_power.append((food, heal_power))
 
-            best_food = max(food_power, key=lambda f: f[1] if f[1] < max_hp else -1 * f[1])
+            # Preference for food: heal <= max_hp sort in descending order, then, heal > max_hp in ascending order.
+            best_food = max(food_power, key=lambda f: f[1] if f[1] <= max_hp else -1 * f[1])
             return best_food
         else:
-            return (None, 0)
+            return None
         
     def get_heal_power_of_food(self, food: str) -> int:
         if not self.is_food(food):
@@ -380,6 +380,22 @@ class WorldState:
         
         locations = self._interactions.monsters[monster]
         return locations
+
+    def simulate_fight_against_monster(self, character: dict, monster: str):
+        if not self.is_a_monster(monster):
+            raise KeyError(f"{monster} is not a monster.")
+        
+        monster_data = self.get_monster_info(monster)
+
+        char_first = character.get("initiative", 0) > monster_data.get("initiative", 0) 
+
+        char_damage = 2
+
+    def calculate_damage_against_character_and_monster(self, character: dict, monster: str):
+        if not self.is_a_monster(monster):
+            raise KeyError(f"{monster} is not a monster.")
+        
+        monster_data = self.get_monster_info(monster)
     
     # Bank Checkers
     def get_bank_locations(self) -> List[Tuple[int, int]]:

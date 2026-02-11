@@ -297,18 +297,15 @@ class CharacterAgent:
                     case "gathering":
                         if on_task := action.params.get("on_task", False): 
                             resource = self.char_data["task"]
-                            skill = self.world_state.get_gather_skill_for_resource(task)
+                            skill = self.world_state.get_gather_skill_for_resource(resource)
 
                         if on_task or (skill := action.params.get("sub_preset")):
                             if best_tool := self.world_state.get_best_tool_for_skill_in_bank(skill):
                                 # If current tool is same or better, don't bother withdrawing
                                 equipped_item = self.char_data["weapon_slot"]
-                                if self.world_state.get_gather_power_of_tool(equipped_item, skill) <= best_tool[1]:
-                                    self.context["last_withdrawn"] = []
-                                    return ActionOutcome.CANCEL
-
-                                items_to_withdraw = [{ "code": best_tool[0], "quantity": 1 }]
-                                self.context["last_withdrawn"] = items_to_withdraw
+                                if (not equipped_item or (equipped_item and self.world_state.get_gather_power_of_tool(equipped_item, skill) < best_tool[1])):
+                                    items_to_withdraw = [{ "code": best_tool[0], "quantity": 1 }]
+                                    self.context["last_withdrawn"] = items_to_withdraw
                         
                         if not items_to_withdraw:
                             self.context["last_withdrawn"] = []
