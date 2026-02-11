@@ -141,8 +141,8 @@ async def main():
 
     # Run some starting commands
     parse_input(planner, scheduler, world_state, "Cameron craft-or-gather ash_plank max")
-    #parse_input(planner, scheduler, world_state, "Maett craft-or-gather copper_bar max")
-    #parse_input(planner, scheduler, world_state, "Oscar craft-or-gather cooked_gudgeon max")
+    parse_input(planner, scheduler, world_state, "Maett craft-or-gather copper_bar max")
+    parse_input(planner, scheduler, world_state, "Oscar craft-or-gather cooked_gudgeon max")
     parse_input(planner, scheduler, world_state, "Jayne craft-or-gather copper_bar max")
     parse_input(planner, scheduler, world_state, "Moira craft-or-gather cooked_gudgeon max")
 
@@ -171,6 +171,9 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: World
     match action_kw:
         case "status":
             scheduler.get_status()
+
+        case "abort":
+            agent.set_abort_actions()
             
         case 'move':
             if len(args) == 1 and args[0] == "prev":

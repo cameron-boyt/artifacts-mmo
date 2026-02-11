@@ -84,7 +84,13 @@ class ActionScheduler:
             # Pop the next node and process
             node = queue.popleft()
             await self._process_node(agent, node)
-            self.logger.info(f"[{character_name}] Finished queued node.")
+            
+            # If the chain was aborted upwards, unset the flag so the agent can act again
+            if agent.abort_actions:
+                self.logger.warning(f"[{character_name}] Active node successfully aborted.")
+                agent.unset_abort_actions()
+            else:
+                self.logger.info(f"[{character_name}] Finished queued node.")
 
     async def _process_node(self, agent: CharacterAgent, node: Action | ActionGroup | ActionControlNode) -> bool:
         if isinstance(node, Action):
@@ -100,6 +106,9 @@ class ActionScheduler:
 
     async def _process_single_action(self, agent: CharacterAgent, action: Action) -> bool:
         """Process a single action to be made by an agent, repeating as defined."""
+        if agent.abort_actions:
+            return False
+        
         retry_count = 0
         retry_max = 3
 

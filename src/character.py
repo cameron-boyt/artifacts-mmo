@@ -29,6 +29,7 @@ class CharacterAgent:
         self.world_state = world_state
 
         self.is_autonomous: bool = False
+        self.abort_actions: bool = False
         self.cooldown_expires_at: float = 0.0
 
     ## Helper Functions
@@ -58,11 +59,13 @@ class CharacterAgent:
         free_inv_spaces = self.get_free_inventory_spaces()
 
         # Resolve any ItemType items
+        true_order = []
         for item in order.items:
             if item.item_type:
                 match item.item_type:
                     case ItemType.FOOD:
-                        self.world_state.get_best_food_for_character(self)
+                        item.item = self.world_state.get_best_food_for_character_in_bank(self.char_data["max_hp"])
+
 
         for item in order.items:
             i = item.item
@@ -161,6 +164,12 @@ class CharacterAgent:
                 return item_data["quantity"]
 
         return 0
+    
+    def set_abort_actions(self):
+        self.abort_actions = True
+
+    def unset_abort_actions(self):
+        self.abort_actions = False
 
     ## Condition Checkers
     def inventory_full(self) -> bool:

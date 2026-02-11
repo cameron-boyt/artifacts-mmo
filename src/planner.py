@@ -312,7 +312,7 @@ class ActionPlanner:
 
                 required_materials = self.world_state.get_crafting_materials_for_item(craft_item, craft_qty)
                 items=[
-                    ItemSelection(m["code"], ItemQuantity(min=m["quantity"], max=m["quantity"]))
+                    ItemSelection(item=m["code"], quantity=ItemQuantity(min=m["quantity"], max=m["quantity"]))
                     for m in required_materials
                 ]
                 

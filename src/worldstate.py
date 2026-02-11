@@ -244,6 +244,14 @@ class WorldState:
         if not self.is_equipment(armour):
             raise KeyError(f"{armour} is not equipment.")
         
+        # take into account weapon
+        # calcualte turns to kill monster
+        # from that get armour the optimises min damage taken
+
+        # if further damage inc / receive damage reduction doesn't help, opt for utilsty stats like wisdom
+
+        # alternative, maximise wisdom for skilling
+        
         monster_data = self._monster_data[monster]
         armour_data = self.get_item_info(armour)
 
