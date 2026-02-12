@@ -19,6 +19,7 @@ class RequestOutcomeDetail(Enum):
     ALREADY_AT_DESTINATION = auto()
     ALREADY_HAS_TASK = auto()
     LEVEL_TOO_LOW = auto()
+    CONDITIONS_NOT_MET = auto()
     INVENTORY_FULL = auto()
     ON_COOLDOWN = auto()
     NO_INTERACTION = auto()
@@ -226,6 +227,12 @@ class APIClient:
                 self.logger.warning("Character level too low.")
                 outcome = RequestOutcome.FAIL
                 detail = RequestOutcomeDetail.LEVEL_TOO_LOW
+
+            case 496:
+                # Conditions not met
+                self.logger.warning("Conditions not met.")
+                outcome = RequestOutcome.FAIL
+                detail = RequestOutcomeDetail.CONDITIONS_NOT_MET
 
             case 497:
                 # Character inventory is full

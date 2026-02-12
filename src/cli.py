@@ -383,8 +383,20 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: World
                 node = planner.plan(ActionIntent(Intention.COMPLETE_TASKS, type="monsters"))
             elif args[0] == "items":
                 node = planner.plan(ActionIntent(Intention.COMPLETE_TASKS, type="items"))
-
+            else:
+                return
+            
             scheduler.queue_action_node(character_name, node)
+
+        case 'craft-until-level':
+            if len(args) != 2:
+                return
+            
+            item = args[0]
+            level = int(args[1])
+            node = planner.plan(ActionIntent(Intention.CRAFT_UNTIL_LEVEL, item=item, level=level))
+            scheduler.queue_action_node(character_name, node)
+
 
 if __name__ == '__main__':
     asyncio.run(main())

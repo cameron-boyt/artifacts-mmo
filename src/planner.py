@@ -49,6 +49,8 @@ class Intention(Enum):
     BANK_THEN_RETURN = auto()
     CRAFT_OR_GATHER_INTERMEDIARIES = auto()
 
+    CRAFT_UNTIL_LEVEL = auto()
+
 @dataclass
 class ActionIntent:
     intention: Intention
@@ -386,6 +388,18 @@ class ActionPlanner:
                 act_collect_then_craft.fail_path = act_gather_materials
                 
                 return act_collect_then_craft
-                
+            
+            case Intention.CRAFT_UNTIL_LEVEL:
+                craft_item = intent.params.get("item")
+                level_goal = intent.params.get("level")
+
+                skill = self.world_state.get_item_info(craft_item)["craft"]["skill"]
+                craft_or_gather_plan = self.plan(ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=craft_item, as_many_as_possible=True))
+
+                return REPEAT(
+                    craft_or_gather_plan,
+                    until=cond(ActionCondition.HAS_SKILL_LEVEL, skill=skill, level=level_goal)
+                )
+            
             case _:
                 raise Exception("Unknown action type.")

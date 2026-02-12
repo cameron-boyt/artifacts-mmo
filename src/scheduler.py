@@ -93,6 +93,10 @@ class ActionScheduler:
                 self.logger.info(f"[{character_name}] Finished queued node.")
 
     async def _process_node(self, agent: CharacterAgent, node: Action | ActionGroup | ActionControlNode) -> bool:
+        # Check for abort
+        if agent.abort_actions:
+            return False
+        
         if isinstance(node, Action):
             success = await self._process_single_action(agent, node)
         elif isinstance(node, ActionGroup):
@@ -105,10 +109,7 @@ class ActionScheduler:
         return success
 
     async def _process_single_action(self, agent: CharacterAgent, action: Action) -> bool:
-        """Process a single action to be made by an agent, repeating as defined."""
-        if agent.abort_actions:
-            return False
-        
+        """Process a single action to be made by an agent, repeating as defined."""        
         retry_count = 0
         retry_max = 3
 
@@ -118,6 +119,10 @@ class ActionScheduler:
             if remaining_cooldown > 0:
                 self.logger.debug(f"[{agent.name}] Waiting for cooldown: {round(remaining_cooldown)}s.")
                 await asyncio.sleep(remaining_cooldown)
+
+            # Check for abort
+            if agent.abort_actions:
+                return False
                                     
             # Execute the action
             outcome = await agent.perform(action)
@@ -152,10 +157,18 @@ class ActionScheduler:
                     # A cancelled action can be treated as a success with no state updates
                     self.logger.debug(f"[{agent.name}] Action {action.type} was cancelled.")
                     return True
+                
+            # Check if the repeat until condition has been met for this action
+            if self._evaluate_condition(agent, action.until):
+                break
 
     async def _process_action_group(self, agent: CharacterAgent, action_group: ActionGroup) -> bool:
         """Process an action group, sequencing through all child actions, repeating as defined."""
-        while True:
+        while True:   
+            # Check for abort
+            if agent.abort_actions:
+                return False
+                     
             # Traverse through the grouped actions and execute them in sequence
             for sub_action in action_group.actions:
                 sub_action_successful = await self._process_node(agent, sub_action)
@@ -183,6 +196,10 @@ class ActionScheduler:
             
             case ControlOperator.REPEAT:
                 while True:
+                    # Check for abort
+                    if agent.abort_actions:
+                        return False
+                        
                     result = await self._process_node(agent, control_node.control_node)
 
                     # Break out if the sub node has failed
@@ -264,6 +281,11 @@ class ActionScheduler:
 
                 case ActionCondition.TASK_COMPLETE:
                     condition_met = agent.char_data["task_total"] == agent.char_data["task_progress"]
+
+                case ActionCondition.HAS_SKILL_LEVEL:
+                    skill = expression.parameters["skill"]
+                    level = expression.parameters["level"]
+                    condition_met = agent.has_skill_level(skill, level)
 
                 case _:
                     raise NotImplementedError()

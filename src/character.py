@@ -64,7 +64,7 @@ class CharacterAgent:
             if item.item_type:
                 match item.item_type:
                     case ItemType.FOOD:
-                        item.item = self.world_state.get_best_food_for_character_in_bank(self.char_data["max_hp"])
+                        item.item = self.world_state.get_best_food_for_character_in_bank(self.char_data)
 
 
         for item in order.items:
@@ -211,6 +211,35 @@ class CharacterAgent:
     def items_in_last_withdraw_context(self) -> bool:
         last_withdrawn_items = self.context.get("last_withdrawn", [])
         return len(last_withdrawn_items) > 0
+    
+    def has_skill_level(self, skill, level) -> bool:
+        match skill:
+            case "mining":
+                return self.char_data["mining_level"] >= level
+            
+            case "woodcutting":
+                return self.char_data["woodcutting_level"] >= level
+            
+            case "fishing":
+                return self.char_data["fishing_level"] >= level
+            
+            case "weaponcrafting":
+                return self.char_data["weaponcrafting_level"] >= level
+            
+            case "gearcrafting":
+                return self.char_data["gearcrafting_level"] >= level
+            
+            case "jewelrycrafting":
+                return self.char_data["jewelrycrafting_level"] >= level
+            
+            case "cooking":
+                return self.char_data["cooking_level"] >= level
+            
+            case "alchemy":
+                return self.char_data["alchemy_level"] >= level
+
+            case "character":
+                return self.char_data["level"] >= level
 
     ## Action Performance
     async def perform(self, action: Action) -> ActionOutcome:
@@ -300,7 +329,7 @@ class CharacterAgent:
                             skill = self.world_state.get_gather_skill_for_resource(resource)
 
                         if on_task or (skill := action.params.get("sub_preset")):
-                            if best_tool := self.world_state.get_best_tool_for_skill_in_bank(skill):
+                            if best_tool := self.world_state.get_best_tool_for_skill_in_bank(self.char_data, skill):
                                 # If current tool is same or better, don't bother withdrawing
                                 equipped_item = self.char_data["weapon_slot"]
                                 if (not equipped_item or (equipped_item and self.world_state.get_gather_power_of_tool(equipped_item, skill) < best_tool[1])):
@@ -320,13 +349,13 @@ class CharacterAgent:
                         items_to_withdraw = []
                         self.context["last_withdrawn"] = []
 
-                        if best_weapon := self.world_state.get_best_weapon_for_monster_in_bank(monster):
+                        if best_weapon := self.world_state.get_best_weapon_for_monster_in_bank(self.char_data, monster):
                             # If current weapon is same or better, don't bother withdrawing
                             equipped_item = self.char_data["weapon_slot"]
                             if not equipped_item or (equipped_item and self.world_state.get_attack_power_of_weapon(equipped_item, monster) < best_weapon[1]):
                                 items_to_withdraw.extend([{ "code": best_weapon[0], "quantity": 1 }])
 
-                        if best_armour := self.world_state.get_best_armour_for_monster_in_bank(monster):
+                        if best_armour := self.world_state.get_best_armour_for_monster_in_bank(self.char_data, monster):
                             for armour_type, armour in best_armour.items():
                                 if armour:
                                     # If current armour is same or better, don't bother withdrawing
@@ -336,6 +365,11 @@ class CharacterAgent:
                                         
                         # Contextually set the armour and weapons to be equipped
                         self.context["last_withdrawn"] = items_to_withdraw
+                        # IMPLEMENT QUEUED EQUIPS
+                        # IMPLEMENT QUEUED EQUIPS
+                        # IMPLEMENT QUEUED EQUIPS
+                        # IMPLEMENT QUEUED EQUIPS
+                        # IMPLEMENT QUEUED EQUIPS
 
                         if not items_to_withdraw:
                             self.context["last_withdrawn"] = []
@@ -376,6 +410,12 @@ class CharacterAgent:
                         # If nothing was withdrawn previously, cancel out
                         if not last_withdraw:
                             return ActionOutcome.CANCEL
+                        
+                        # IMPLEMENT QUEUED EQUIPS
+                        # IMPLEMENT QUEUED EQUIPS
+                        # IMPLEMENT QUEUED EQUIPS
+                        # IMPLEMENT QUEUED EQUIPS
+                        # IMPLEMENT QUEUED EQUIPS
                         
                         item = last_withdraw.pop()
                         item_code = item["code"]

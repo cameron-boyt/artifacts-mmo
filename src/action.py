@@ -41,6 +41,7 @@ class ActionCondition(Enum):
     HAS_TASK = auto()
     HAS_TASK_OF_TYPE = auto()
     TASK_COMPLETE = auto()
+    HAS_SKILL_LEVEL = auto()
     FOREVER = auto()
 
 class ActionOutcome(Enum):

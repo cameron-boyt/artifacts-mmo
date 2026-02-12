@@ -131,14 +131,41 @@ class WorldState:
         
         return self._item_data[item]["type"]
     
+    def character_meets_conditions(self, character: dict, conditions: list) -> bool:
+        for condition in conditions:
+            match condition["code"]:
+                case "level" | "mining_level" | "woodcutting_level" | "fishing_level" | "weaponcrafting_level" | \
+                     "gearcrafting_ level" | "jewelrycrafting_level" | "cooking_level" | "alchemy_level":
+                    compare_value = character[condition["code"]]
+                    
+                case _:
+                    raise Exception("idk what this is")
+            
+            match condition["operator"]:
+                case "gt":
+                    condition_met = compare_value > condition["value"]
+
+                case "eq":
+                    condition_met = compare_value == condition["value"]
+
+                case "lt":
+                    condition_met = compare_value < condition["value"]
+                
+            if not condition_met:
+                return False
+            
+        return True
+
+    
     def is_tool(self, item: str) -> bool:
         return self.is_an_item(item) and self._item_data[item]["subtype"] == "tool"
     
-    def get_best_tool_for_skill_in_bank(self, skill: str) -> Tuple[str, int] | None:
+    def get_best_tool_for_skill_in_bank(self, character: dict, skill: str) -> Tuple[str, int] | None:
         tools = [
             item for item in self._bank_data 
             if self.is_tool(item)
             and any(effect["code"] == skill for effect in self._item_data[item]["effects"])
+            and self.character_meets_conditions(character, self._item_data[item]["conditions"])
         ]
 
         if len(tools) > 0:
@@ -163,10 +190,11 @@ class WorldState:
     def is_weapon(self, item: str) -> bool:
         return self.is_an_item(item) and self._item_data[item]["type"] == "weapon"
         
-    def get_best_weapon_for_monster_in_bank(self, monster: str) -> Tuple[str, int] | None:
+    def get_best_weapon_for_monster_in_bank(self, character: dict, monster: str) -> Tuple[str, int] | None:
         weapons = [
             item for item in self._bank_data 
             if self.is_weapon(item)
+            and self.character_meets_conditions(character, self._item_data[item]["conditions"])
         ]
 
         if len(weapons) > 0:
@@ -210,32 +238,51 @@ class WorldState:
     def is_armour(self, item: str) -> bool:
         return self.is_an_item(item) and self._item_data[item]["type"] in ARMOUR_SLOTS
         
-    def get_best_armour_for_monster_in_bank(self, monster: str) -> Dict[str, Tuple[str, int]] | None:
+    def get_best_armour_for_monster_in_bank(self, character: dict, monster: str) -> Dict[str, Tuple[str, int]] | None:
         armours = [
             item for item in self._bank_data 
             if self.is_armour(item)
+            and self.character_meets_conditions(character, self._item_data[item]["conditions"])
         ]
 
         if len(armours) > 0:
             armour_choices = {
                 "helmet": [],
                 "shield": [],
-                "body_armour": [],
-                "leg_armour": [],
-                "boots": []
+                "body_armor": [],
+                "leg_armor": [],
+                "boots": [],
+                "amulet": [],
+                "ring": []
             }
-            
+
             for armour in armours:
                 armour_data = self.get_item_info(armour)
                 armour_type = armour_data["type"]
                 def_power = self.get_defence_power_of_armour(armour, monster)
                 armour_choices[armour_type].append((armour, def_power))
+            
+            # Since we can equip more than 1 ring, check if we have a second of each. if so, chuck it in the list.
+            rings_to_add = []
+            for ring in armour_choices["ring"]:
+                if self.get_amount_of_item_in_bank(ring[0]) > 1:
+                    rings_to_add.append(ring)
 
+            armour_choices["ring"].extend(rings_to_add)
+
+            armour_choices_final = {}
             for k, v in armour_choices.items():
                 if len(v) > 0:
-                    armour_choices[k] = max(v, key=lambda a: a[1])
+                    if k == "ring":
+                        rings = sorted(v, key=lambda a: a[1])[:2]
+                        armour_choices_final["ring1"] = rings[0]
 
-            return armour_choices
+                        if len(rings) > 1:
+                            armour_choices_final["ring2"] = rings[1]
+                    else:
+                        armour_choices_final[k] = max(v, key=lambda a: a[1])
+
+            return armour_choices_final
         else:
             return {}
         
@@ -290,6 +337,18 @@ class WorldState:
                 case "attack_fire":
                     dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
 
+                case "dmg_air":
+                    def_power += effect["value"] / 100
+
+                case "dmg_water":
+                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_water"]) / 100))
+
+                case "dmg_earth":
+                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_earth"]) / 100))
+
+                case "dmg_fire":
+                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
+
                 case "wisdom":
                     wisdom = floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
 
@@ -301,10 +360,11 @@ class WorldState:
     def is_food(self, item: str) -> bool:
         return self.is_an_item(item) and self._item_data[item]["subtype"] == "food"
     
-    def get_best_food_for_character_in_bank(self, max_hp: int) -> str | None:
+    def get_best_food_for_character_in_bank(self, character: dict) -> str | None:
         foods = [
             item for item in self._bank_data 
             if self.is_food(item)
+            and self.character_meets_conditions(character, self._item_data[item]["conditions"])
         ]
 
         if len(foods) > 0:
@@ -314,7 +374,7 @@ class WorldState:
                 food_power.append((food, heal_power))
 
             # Preference for food: heal <= max_hp sort in descending order, then, heal > max_hp in ascending order.
-            best_food = max(food_power, key=lambda f: f[1] if f[1] <= max_hp else -1 * f[1])
+            best_food = max(food_power, key=lambda f: f[1] if f[1] <= character["max_hp"] else -1 * f[1])
             return best_food
         else:
             return None
@@ -381,21 +441,41 @@ class WorldState:
         locations = self._interactions.monsters[monster]
         return locations
 
-    def simulate_fight_against_monster(self, character: dict, monster: str):
+    def simulate_fight_against_monster(self, character: dict, monster: str) -> Tuple[bool, int]:
         if not self.is_a_monster(monster):
             raise KeyError(f"{monster} is not a monster.")
         
         monster_data = self.get_monster_info(monster)
 
-        char_first = character.get("initiative", 0) > monster_data.get("initiative", 0) 
+        damage_dealt, damage_taken = self.calculate_damage_against_character_and_monster(character, monster)
+        turns_to_kill = monster_data["hp"] // damage_dealt
 
-        char_damage = 2
+        # If the monster goes first, the character gets hits one additional time
+        monster_first = character.get("initiative", 0) < monster_data.get("initiative", 0) 
+        if monster_first:
+            turns_to_kill += 1
 
-    def calculate_damage_against_character_and_monster(self, character: dict, monster: str):
-        if not self.is_a_monster(monster):
-            raise KeyError(f"{monster} is not a monster.")
-        
-        monster_data = self.get_monster_info(monster)
+        char_damage_taken = turns_to_kill * damage_taken
+        fight_win = char_damage_taken < character["hp"]
+
+        return fight_win, turns_to_kill, char_damage_taken
+
+    def calculate_damage_against_character_and_monster(self, character: dict, monster: dict) -> Tuple[int, int]:
+        character_damage = (
+            round((character["attack_air"] * character["dmg_air"] / 100) * (1 + monster["res_air"] / 100)) + 
+            round((character["attack_water"] * character["dmg_air"] / 100) * (1 + monster["res_water"] / 100)) + 
+            round((character["attack_earth"] * character["dmg_water"] / 100) * (1 + monster["res_earth"] / 100)) + 
+            round((character["attack_fire"] * character["dmg_fire"] / 100) * (1 + monster["res_fire"] / 100))
+        ) * (1 + character["dmg"] / 100)
+
+        monster_damage = (
+            round((monster["attack_air"] * monster["dmg_air"] / 100) * (1 + character["res_air"] / 100)) + 
+            round((monster["attack_water"] * monster["dmg_air"] / 100) * (1 + character["res_water"] / 100)) + 
+            round((monster["attack_earth"] * monster["dmg_water"] / 100) * (1 + character["res_earth"] / 100)) + 
+            round((monster["attack_fire"] * monster["dmg_fire"] / 100) * (1 + character["res_fire"] / 100))
+        )
+
+        return character_damage, monster_damage
     
     # Bank Checkers
     def get_bank_locations(self) -> List[Tuple[int, int]]:
