@@ -358,7 +358,8 @@ class WorldState:
         return def_power
         
     def is_food(self, item: str) -> bool:
-        return self.is_an_item(item) and self._item_data[item]["subtype"] == "food"
+        # Forbid eating apples :)
+        return self.is_an_item(item) and self._item_data[item]["subtype"] == "food" and item != "apple"
     
     def get_best_food_for_character_in_bank(self, character: dict) -> str | None:
         foods = [

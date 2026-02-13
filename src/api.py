@@ -17,6 +17,7 @@ class RequestOutcomeDetail(Enum):
     INVALID_PAYLOAD = auto()
     MISSING_REQUIRED_ITEMS = auto()
     ALREADY_AT_DESTINATION = auto()
+    NO_TASK = auto()
     ALREADY_HAS_TASK = auto()
     LEVEL_TOO_LOW = auto()
     CONDITIONS_NOT_MET = auto()
@@ -99,8 +100,10 @@ class APIClient:
         response = await self._client.post(f"/my/{character_name}/action/unequip", json=payload)
         return await self.handle_status(response)
     
-    async def use(self) -> APIResult:
-        raise NotImplementedError()
+    async def use(self, character_name: str, item_code: str, quantity: int = 1) -> APIResult:
+        payload = { "code": item_code, "quantity": quantity }
+        response = await self._client.post(f"/my/{character_name}/action/use", json=payload)
+        return await self.handle_status(response)
 
     async def fight(self, character_name: str) -> APIResult:
         response = await self._client.post(f"/my/{character_name}/action/fight")
@@ -209,6 +212,12 @@ class APIClient:
                 self.logger.error("Character missing required items for action.")
                 outcome = RequestOutcome.FAIL
                 detail = RequestOutcomeDetail.MISSING_REQUIRED_ITEMS
+            
+            case 478:
+                # Character has no task
+                self.logger.error("Character has no task.")
+                outcome = RequestOutcome.FAIL
+                detail = RequestOutcomeDetail.NO_TASK
 
             case 489:
                 # Character already has task

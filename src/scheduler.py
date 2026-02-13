@@ -268,19 +268,25 @@ class ActionScheduler:
                     item = expression.parameters["item"]
                     quantity = expression.parameters["quantity"]
                     condition_met = agent.bank_and_inventory_have_item_of_quantity(item, quantity)
+                    
+                case ActionCondition.INVENTORY_CONTAINS_USABLE_FOOD:
+                    condition_met = agent.inventory_contains_usable_food()
+                
+                case ActionCondition.HEALTH_LOW_ENOUGH_TO_EAT:
+                    condition_met = agent.health_sufficiently_low_to_heal()
 
-                case ActionCondition.ITEMS_IN_LAST_WITHDRAW_CONTEXT:
-                    condition_met = agent.items_in_last_withdraw_context()
+                case ActionCondition.ITEMS_IN_EQUIP_QUEUE:
+                    condition_met = agent.items_in_equip_queue()
 
                 case ActionCondition.HAS_TASK:
                     condition_met = agent.has_task()
 
                 case ActionCondition.HAS_TASK_OF_TYPE:
-                    task_type = expression.parameters["type"]
-                    condition_met = agent.char_data["task_type"] == task_type
+                    task_type = expression.parameters["task_type"]
+                    condition_met = agent.has_task_of_type(task_type)
 
                 case ActionCondition.TASK_COMPLETE:
-                    condition_met = agent.char_data["task_total"] == agent.char_data["task_progress"]
+                    condition_met = agent.has_completed_task()
 
                 case ActionCondition.HAS_SKILL_LEVEL:
                     skill = expression.parameters["skill"]

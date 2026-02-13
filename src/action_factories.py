@@ -30,8 +30,8 @@ def equip(**params) -> Action:
 def unequip(**params) -> Action:
     return Action(CharacterAction.UNEQUIP, params=params)
 
-def use() -> Action:
-    raise NotImplementedError()
+def use(until: ActionConditionExpression | None = None, **params) -> Action:
+    return Action(CharacterAction.USE, params=params, until=until)
 
 # Skilling
 def gather(until: ActionConditionExpression | None = None) -> Action:
@@ -63,5 +63,11 @@ def bank_all_gold() -> Action:
 def get_task() -> Action:
     return Action(CharacterAction.GET_TASK)
 
+def task_trade(**params) -> Action:
+    return Action(CharacterAction.TASK_TRADE, params=params)
+
 def complete_task() -> Action:
     return Action(CharacterAction.COMPLETE_TASK)
+
+def task_exchange() -> Action:
+    return Action(CharacterAction.TASK_EXCHANGE)

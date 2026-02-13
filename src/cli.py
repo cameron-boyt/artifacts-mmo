@@ -140,11 +140,11 @@ async def main():
         scheduler.add_character(character, world_state)
 
     # Run some starting commands
-    parse_input(planner, scheduler, world_state, "Cameron craft-or-gather ash_plank max")
-    parse_input(planner, scheduler, world_state, "Maett craft-or-gather copper_bar max")
-    parse_input(planner, scheduler, world_state, "Oscar craft-or-gather cooked_gudgeon max")
-    parse_input(planner, scheduler, world_state, "Jayne craft-or-gather copper_bar max")
-    parse_input(planner, scheduler, world_state, "Moira craft-or-gather cooked_gudgeon max")
+    parse_input(planner, scheduler, world_state, "Cameron complete-tasks items")
+    parse_input(planner, scheduler, world_state, "Maett complete-tasks monsters")
+    parse_input(planner, scheduler, world_state, "Oscar complete-tasks monsters")
+    parse_input(planner, scheduler, world_state, "Jayne complete-tasks items")
+    parse_input(planner, scheduler, world_state, "Moira complete-tasks items")
 
     while True:
         c = await asyncio.to_thread(input, "Enter Command: ")
@@ -306,7 +306,7 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: World
                     print("not a monster")
                     return
                 
-            fight_plan = planner.plan(ActionIntent(Intention.FIGHT_THEN_REST, monster=args[0], until=cond(ActionCondition.INVENTORY_FULL)))
+            fight_plan = planner.plan(ActionIntent(Intention.FIGHT, monster=args[0], until=cond(ActionCondition.INVENTORY_FULL)))
 
             node = action_group(                
                 planner.plan(ActionIntent(Intention.PREPARE_FOR_FIGHTING, monster=args[0])),

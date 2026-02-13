@@ -522,18 +522,18 @@ def test__has_task(agent: CharacterAgent, task, expected):
     result = agent.has_task()
     assert result == expected
     
-#items_in_last_withdraw_context
+#items_in_equip_queue
 @pytest.mark.parametrize(
     "context,expected",
     [
         pytest.param({}, False, id="not_defined"),
-        pytest.param({ "last_withdrawn": [] }, False, id="no_withdrawals"),
-        pytest.param({ "last_withdrawn": [{ "code": "copper_helmet", "quantity": 1 }] }, True, id="has_withdrawals"),
+        pytest.param({ "equip_queue": [] }, False, id="no_withdrawals"),
+        pytest.param({ "equip_queue": [{ "code": "copper_helmet", "quantity": 1 }] }, True, id="has_withdrawals"),
     ]
 )
 
-def test__items_in_last_withdraw_context(agent: CharacterAgent, context, expected):
+def test__items_in_equip_queue(agent: CharacterAgent, context, expected):
     agent.context = context
-    result = agent.items_in_last_withdraw_context()
+    result = agent.items_in_equip_queue()
     assert result == expected
     

@@ -24,7 +24,9 @@ class CharacterAgent:
         self.name = character_data["name"]
         self.char_data: Dict[str, Any] = character_data
         self.context = {
-            "previous_location": (self.char_data["x"],  self.char_data["y"])
+            "previous_location": (self.char_data["x"],  self.char_data["y"]),
+            "equip_queue": [],
+            "damage_taken_last_fight": self.char_data["max_hp"] -self.char_data["hp"]
         }
         self.world_state = world_state
 
@@ -64,8 +66,11 @@ class CharacterAgent:
             if item.item_type:
                 match item.item_type:
                     case ItemType.FOOD:
-                        item.item = self.world_state.get_best_food_for_character_in_bank(self.char_data)
-
+                        best_food = self.world_state.get_best_food_for_character_in_bank(self.char_data)
+                        if best_food:
+                            item.item = best_food[0]
+                        else:
+                            return []
 
         for item in order.items:
             i = item.item
@@ -146,6 +151,21 @@ class CharacterAgent:
 
         return items
     
+    def _get_best_food_in_inv(self) -> str | None:
+        food = [
+            (item, self.world_state.get_heal_power_of_food(item["code"]))
+            for item in self.char_data["inventory"]
+            if self.world_state.is_food(item["code"]) 
+            and self.world_state.character_meets_conditions(
+                self.char_data, 
+                self.world_state.get_item_info(item["code"])["conditions"]
+            )
+        ]
+
+        if len(food) > 0:
+            best_food = max(food, key=lambda f: f[1] if f[1] <= self.char_data["max_hp"] else -1 * f[1])
+            return best_food[0]  
+
     def get_number_of_items_in_inventory(self) -> int:
         """Get the total number of items in the agent's inventory"""
         return sum(item["quantity"] for item in self.char_data["inventory"])
@@ -205,12 +225,40 @@ class CharacterAgent:
         bank_quantity = self.world_state.get_amount_of_item_in_bank(item)
         return inv_quantity + bank_quantity >= quantity
     
+    def inventory_contains_usable_food(self) -> bool:
+        usable_food = [
+            item for item in self.char_data["inventory"]
+            if self.world_state.is_food(item["code"]) 
+            and self.world_state.character_meets_conditions(
+                self.char_data, 
+                self.world_state.get_item_info(item["code"])["conditions"]
+            )
+        ]
+
+        return len(usable_food) > 0
+    
+    def health_sufficiently_low_to_heal(self) -> bool:
+        taken_sufficient_damage = self.char_data["hp"] < self.context["damage_taken_last_fight"] * 1.5
+        at_max_health = self.char_data["hp"] == self.char_data["max_hp"]
+        return taken_sufficient_damage and not at_max_health
+        
     def has_task(self) -> bool:
         return self.char_data["task"] != ""
     
-    def items_in_last_withdraw_context(self) -> bool:
-        last_withdrawn_items = self.context.get("last_withdrawn", [])
-        return len(last_withdrawn_items) > 0
+    def has_task_of_type(self, task_type: str) -> bool:
+        if task_type == "gathering":
+            return self.world_state.is_a_resource(self.char_data["task"])
+        elif task_type == "crafting":
+            return self.world_state.item_is_craftable(self.char_data["task"])
+        else:
+            raise Exception("unknown task type")
+    
+    def has_completed_task(self) -> bool:
+        return self.char_data["task_progress"] == self.char_data["task_total"]
+    
+    def items_in_equip_queue(self) -> bool:
+        equip_queue = self.context.get("equip_queue", [])
+        return len(equip_queue) > 0
     
     def has_skill_level(self, skill, level) -> bool:
         match skill:
@@ -334,10 +382,9 @@ class CharacterAgent:
                                 equipped_item = self.char_data["weapon_slot"]
                                 if (not equipped_item or (equipped_item and self.world_state.get_gather_power_of_tool(equipped_item, skill) < best_tool[1])):
                                     items_to_withdraw = [{ "code": best_tool[0], "quantity": 1 }]
-                                    self.context["last_withdrawn"] = items_to_withdraw
+                                    self.context["equip_queue"].append({ "code": best_tool[0], "slot": "weapon" })
                         
                         if not items_to_withdraw:
-                            self.context["last_withdrawn"] = []
                             return ActionOutcome.CANCEL
                             
                     case "fighting":
@@ -347,33 +394,32 @@ class CharacterAgent:
                             monster = action.params.get("sub_preset")
 
                         items_to_withdraw = []
-                        self.context["last_withdrawn"] = []
 
                         if best_weapon := self.world_state.get_best_weapon_for_monster_in_bank(self.char_data, monster):
                             # If current weapon is same or better, don't bother withdrawing
                             equipped_item = self.char_data["weapon_slot"]
                             if not equipped_item or (equipped_item and self.world_state.get_attack_power_of_weapon(equipped_item, monster) < best_weapon[1]):
                                 items_to_withdraw.extend([{ "code": best_weapon[0], "quantity": 1 }])
+                                self.context["equip_queue"].append({ "code": best_weapon[0], "slot": "weapon" })
 
                         if best_armour := self.world_state.get_best_armour_for_monster_in_bank(self.char_data, monster):
                             for armour_type, armour in best_armour.items():
                                 if armour:
                                     # If current armour is same or better, don't bother withdrawing
-                                    equipped_item = self.char_data[f"{armour_type}_slot"]
+                                    item_slot = f"{armour_type}_slot"
+                                    equipped_item = self.char_data[item_slot]
                                     if not equipped_item or (equipped_item and self.world_state.get_defence_power_of_armour(equipped_item, monster) < armour[1]):
                                         items_to_withdraw.extend([{ "code": armour[0], "quantity": 1 }])
-                                        
-                        # Contextually set the armour and weapons to be equipped
-                        self.context["last_withdrawn"] = items_to_withdraw
-                        # IMPLEMENT QUEUED EQUIPS
-                        # IMPLEMENT QUEUED EQUIPS
-                        # IMPLEMENT QUEUED EQUIPS
-                        # IMPLEMENT QUEUED EQUIPS
-                        # IMPLEMENT QUEUED EQUIPS
+                                        self.context["equip_queue"].append({ "code": armour[0], "slot": armour_type })
 
                         if not items_to_withdraw:
-                            self.context["last_withdrawn"] = []
                             return ActionOutcome.CANCEL
+                        
+                    case "on_task":
+                        task_item = self.char_data["task"]
+                        item_order = ItemOrder([ItemSelection(item=task_item, quantity=ItemQuantity(min=1))])
+                        items_to_withdraw = self._construct_item_list(item_order)
+
                     case _:
                         # Construct a list of items that need to be withdrawn
                         item_order = action.params.get("items")
@@ -403,33 +449,38 @@ class CharacterAgent:
 
             ## EQUIPMENT ##
             case CharacterAction.EQUIP:
-                match action.params.get("context", "none"):
-                    case "last_withdrawn":
-                        last_withdraw = self.context.get("last_withdrawn", [])
+                if action.params.get("use_queue", False):
+                    equip_queue = self.context.get("equip_queue", [])
 
-                        # If nothing was withdrawn previously, cancel out
-                        if not last_withdraw:
-                            return ActionOutcome.CANCEL
-                        
-                        # IMPLEMENT QUEUED EQUIPS
-                        # IMPLEMENT QUEUED EQUIPS
-                        # IMPLEMENT QUEUED EQUIPS
-                        # IMPLEMENT QUEUED EQUIPS
-                        # IMPLEMENT QUEUED EQUIPS
-                        
-                        item = last_withdraw.pop()
-                        item_code = item["code"]
-                        item_slot = self.world_state.get_equip_slot_for_item(item_code)
+                    # If nothing is in the queue, cancel out
+                    if len(equip_queue) == 0:
+                        return ActionOutcome.CANCEL
+                    
+                    item = equip_queue.pop()
+                    item_code = item["code"]
+                    item_slot = item["slot"]
 
-                    case _:
-                        item_code = action.params.get("item")
-                        item_slot = action.params.get("slot")
+                else:
+                    item_code = action.params.get("item")
+                    item_slot = action.params.get("slot")
                         
                 api_result = await self.api_client.equip(self.name, item_code, item_slot)
 
             case CharacterAction.UNEQUIP:
                 item_slot = action.params.get("slot")
                 api_result = await self.api_client.unequip(self.name, item_slot)
+
+            case CharacterAction.USE:
+                match action.params.get("item_type"):
+                    case "food":
+                        item_to_use = self._get_best_food_in_inv()
+                        if not item_to_use:
+                            return ActionOutcome.CANCEL
+
+                    case _:
+                        raise Exception("idk what to use")
+                    
+                api_result = await self.api_client.use(self.name, item_to_use["code"])
 
             ## CRAFTING ##
             case CharacterAction.CRAFT:
@@ -457,6 +508,11 @@ class CharacterAgent:
             case CharacterAction.GET_TASK:
                 api_result = await self.api_client.accept_new_task(self.name)
 
+            case CharacterAction.TASK_TRADE:
+                item = action.params.get("item")
+                quantity = action.params.get("quantity")
+                api_result = await self.api_client.task_trade(self.name, item, quantity)
+
             case CharacterAction.COMPLETE_TASK:
                 api_result = await self.api_client.complete_task(self.name)
         
@@ -465,8 +521,16 @@ class CharacterAgent:
             
         
         if api_result.outcome == RequestOutcome.SUCCESS:
+            # If a fight occurred, get some data for future context
+            if fight_result_info := api_result.response.get("data", {}).get("fight", {}).get("characters", {}):
+                old_hp = self.char_data["hp"]
+                new_hp = fight_result_info[0]["final_hp"]
+                self.context["damage_taken_last_fight"] = old_hp - new_hp
+                self.char_data = api_result.response.get("data", {}).get("characters")[0]
+
             # Update character state
-            self.char_data = api_result.response.get("data").get("character")
+            if new_char_data := api_result.response.get("data", {}).get("character"):
+                self.char_data = new_char_data
 
             # Update the agent's cooldown
             new_cooldown = api_result.response.get("data").get("cooldown").get("remaining_seconds")

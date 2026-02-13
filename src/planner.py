@@ -35,9 +35,8 @@ class Intention(Enum):
 
     # Tasks
     COMPLETE_TASKS = auto()
-    COMPLETE_FIGHTING_TASK = auto()
-    COMPLETE_GATHERING_TASK = auto()
-    COMPLETE_CRAFTING_TASK = auto()
+    COMPLETE_MONSTER_TASK = auto()
+    COMPLETE_ITEM_TASK = auto()
 
     # Complex Intentions
     PREPARE_FOR_GATHERING =  auto()
@@ -45,7 +44,6 @@ class Intention(Enum):
 
     COLLECT_THEN_CRAFT = auto()
 
-    FIGHT_THEN_REST = auto()
     BANK_THEN_RETURN = auto()
     CRAFT_OR_GATHER_INTERMEDIARIES = auto()
 
@@ -79,27 +77,50 @@ class ActionPlanner:
                 raise NotImplementedError()
             
             case Intention.FIGHT:
-                if monster := intent.params.get("monster"):
+                if intent.params.get("on_task", False):
+                    move_action = move(on_task=True)
+                elif monster := intent.params.get("monster"):
                     monster_locations = self.world_state.get_locations_of_monster(monster)
-                    return action_group(
-                        move(closest_of=monster_locations),
-                        fight(until=intent.until)
-                    )
+                    move_action = move(closest_of=monster_locations)
                 else:
-                    return fight(until=intent.until)
+                    move_action = do_nothing()
+                
+                return action_group(
+                        move_action,
+                        action_group(
+                            IF(
+                                (
+                                    cond(ActionCondition.HEALTH_LOW_ENOUGH_TO_EAT),
+                                    IF(
+                                        (
+                                            cond(ActionCondition.INVENTORY_CONTAINS_USABLE_FOOD),
+                                            use(item_type="food", until=NOT(cond(ActionCondition.HEALTH_LOW_ENOUGH_TO_EAT)))
+                                        ),
+                                        fail_path=rest()
+                                    )
+                                )
+                            ),
+                            fight(),                            
+                            until=intent.until
+                        )
+                    )
 
             case Intention.REST:
                 return rest()
             
             case Intention.GATHER:
-                if resource := intent.params.get("resource"):
+                if intent.params.get("on_task", False):
+                    move_action = move(on_task=True)
+                elif resource := intent.params.get("resource"):
                     resource_locations = self.world_state.get_locations_of_resource(resource)
-                    return action_group(
-                        move(closest_of=resource_locations),
-                        gather(until=intent.until)
-                    )
+                    move_action = move(closest_of=resource_locations)
                 else:
-                    return gather(until=intent.until)
+                    move_action = do_nothing()
+
+                return action_group(
+                    move_action,
+                    gather(until=intent.until)
+                )
             
             case Intention.CRAFT:
                 item: str = intent.params.get("item")
@@ -167,56 +188,74 @@ class ActionPlanner:
                 task_type = intent.params.get("type")
 
                 if task_type == "monsters":
-                    return action_group(
-                        IF(
-                            (NOT(cond(ActionCondition.HAS_TASK)), action_group(
-                                move(closest_of=task_master_locations.get("monsters")),
-                                get_task()
-                            ))
-                        ),
-                        self.plan(ActionIntent(Intention.COMPLETE_FIGHTING_TASK)),
-                        complete_task(),
-                        until=ActionCondition.FOREVER
-                    )
+                    move_to_task_master_action = move(closest_of=task_master_locations.get("monsters"))
+                    complete_task_plan = self.plan(ActionIntent(Intention.COMPLETE_MONSTER_TASK))
                 elif task_type == "items":
-                    return action_group(
+                    move_to_task_master_action = move(closest_of=task_master_locations.get("items"))
+                    complete_task_plan = self.plan(ActionIntent(Intention.COMPLETE_ITEM_TASK))
+                
+                return action_group(
                         IF(
                             (NOT(cond(ActionCondition.HAS_TASK)), action_group(
-                                move(closest_of=task_master_locations.get("items")),
+                                move_to_task_master_action,
                                 get_task()
                             ))
                         ),
-                        self.plan(ActionIntent(Intention.COMPLETE_GATHERING_TASK)),
-                        complete_task(),
+                        IF(
+                            (cond(ActionCondition.TASK_COMPLETE), action_group(
+                                move_to_task_master_action,
+                                complete_task()
+                            ))
+                        ),
+                        complete_task_plan,
                         until=ActionCondition.FOREVER
                     )
 
-            case Intention.COMPLETE_FIGHTING_TASK:
-                monster = intent.params.get("monster")
+            case Intention.COMPLETE_MONSTER_TASK:
+                preparation_plan = self.plan(ActionIntent(Intention.PREPARE_FOR_FIGHTING, on_task=True))
                 return action_group(
-                    self.plan(ActionIntent(Intention.PREPARE_FOR_FIGHTING, on_task=True)),
-                    REPEAT(
-                        self.plan(ActionIntent(Intention.FIGHT_THEN_REST, on_task=True)),
+                    preparation_plan,
+                    action_group(
+                        IF((
+                            NOT(cond(ActionCondition.INVENTORY_CONTAINS_USABLE_FOOD)), 
+                            preparation_plan
+                        )),
+                        self.plan(ActionIntent(Intention.FIGHT, on_task=True)),
                         until=cond(ActionCondition.TASK_COMPLETE)
                     )
                 )
                 
-            case Intention.COMPLETE_GATHERING_TASK:
-                resource = intent.params.get("resource")
-                return action_group(
-                    self.plan(ActionIntent(Intention.PREPARE_FOR_GATHERING, on_task=True)),
-                    REPEAT(
+            case Intention.COMPLETE_ITEM_TASK:
+                task_master_locations = self.world_state.get_task_master_locations()
+                return IF(
+                    (
+                        cond(ActionCondition.HAS_TASK_OF_TYPE, task_type="gathering"),
                         action_group(
-                            self.plan(ActionIntent(Intention.GATHER, on_task=True, until=cond(ActionCondition.INVENTORY_FULL))),
-                            bank_all_items()
-                        ),
-                        until=cond(ActionCondition.TASK_COMPLETE)
+                            self.plan(ActionIntent(Intention.PREPARE_FOR_GATHERING, on_task=True)),
+                            REPEAT(
+                                action_group(
+                                    self.plan(ActionIntent(Intention.GATHER, on_task=True, until=cond(ActionCondition.INVENTORY_FULL))),
+                                    bank_all_items(),
+                                    bank_withdraw_item(preset="on_task"),
+                                    move(closest_of=task_master_locations.get("items")),
+                                    task_trade()
+                                ),
+                                until=cond(ActionCondition.TASK_COMPLETE)
+                            )
+                        )
+                    ),
+                    (
+                        cond(ActionCondition.HAS_TASK_OF_TYPE, task_type="crafting"),
+                        action_group(
+                            self.plan(ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, on_task=True)),
+                            bank_all_items(),
+                            bank_withdraw_item(preset="on_task"),
+                            move(closest_of=task_master_locations.get("items")),
+                            task_trade(),
+                            until=cond(ActionCondition.TASK_COMPLETE)
+                        )
                     )
                 )
-                
-            case Intention.COMPLETE_CRAFTING_TASK:
-                pass
-                
             
             # Complex Intentions
             case Intention.PREPARE_FOR_GATHERING:
@@ -234,8 +273,8 @@ class ActionPlanner:
                     action_group(
                         bank_withdraw_action,
                         REPEAT(
-                            IF((cond(ActionCondition.ITEMS_IN_LAST_WITHDRAW_CONTEXT), equip(context="last_withdrawn"))),
-                            until=NOT(cond(ActionCondition.ITEMS_IN_LAST_WITHDRAW_CONTEXT))
+                            IF((cond(ActionCondition.ITEMS_IN_EQUIP_QUEUE), equip(use_queue=True))),
+                            until=NOT(cond(ActionCondition.ITEMS_IN_EQUIP_QUEUE))
                         ),
                         bank_all_items()
                     ) 
@@ -249,7 +288,7 @@ class ActionPlanner:
                     monster = intent.params.get("monster")
                     bank_withdraw_action_gear = bank_withdraw_item(preset=f"fighting", sub_preset=monster)
 
-                item_order = ItemOrder(items=[ItemSelection(item_type=ItemType.FOOD, quantity=ItemQuantity(max=20))])
+                item_order = ItemOrder(items=[ItemSelection(item_type=ItemType.FOOD, quantity=ItemQuantity(max=50))])
                 bank_withdraw_action_food = bank_withdraw_item(items=item_order)
 
                 return action_group(
@@ -258,40 +297,13 @@ class ActionPlanner:
                     action_group(
                         bank_withdraw_action_gear,
                         REPEAT(
-                            IF((cond(ActionCondition.ITEMS_IN_LAST_WITHDRAW_CONTEXT), equip(context="last_withdrawn"))),
-                            until=NOT(cond(ActionCondition.ITEMS_IN_LAST_WITHDRAW_CONTEXT))
+                            IF((cond(ActionCondition.ITEMS_IN_EQUIP_QUEUE), equip(use_queue=True))),
+                            until=NOT(cond(ActionCondition.ITEMS_IN_EQUIP_QUEUE))
                         ),
                         bank_all_items(),
                         bank_withdraw_action_food
                     ) 
-                )
-
-            case Intention.FIGHT_THEN_REST:
-                if intent.params.get("on_task", False):
-                    return action_group(
-                        move(on_task=True),
-                        action_group(
-                            fight(),
-                            rest(),
-                            until=intent.until
-                        )
-                    )
-                elif monster := intent.params.get("monster"):
-                    monster_locations = self.world_state.get_locations_of_monster(monster)
-                    return action_group(
-                        move(closest_of=monster_locations),
-                        action_group(
-                            fight(),
-                            rest(),
-                            until=intent.until
-                        )
-                    )
-                else:
-                    return action_group(
-                        fight(),
-                        rest(),
-                        until=intent.until
-                    )
+                )                
 
             case Intention.BANK_THEN_RETURN:
                 if intent.params.get("preset") == "all":
