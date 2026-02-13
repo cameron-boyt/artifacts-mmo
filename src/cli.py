@@ -104,6 +104,15 @@ async def get_monster_data(api: APIClient, query_api: bool = False) -> Dict[str,
 
     return all_monster_data
 
+async def get_character_data(api: APIClient) -> List[dict]:
+    characters = await api.get_characters()
+    character_data = characters["data"]
+    
+    with open('character_data.json', 'w') as f:
+        f.write(json.dumps(character_data))
+
+    return character_data
+
 async def main():
     logging.basicConfig(
         filename="artifacts.log",
@@ -129,14 +138,14 @@ async def main():
     map_data = await get_map_data(api, GET_API_DATA)
     resource_data = await get_resource_data(api, GET_API_DATA)
     monster_data = await get_monster_data(api, GET_API_DATA)
+    character_data = await get_character_data(api)
 
     world_state = WorldState(bank_data, map_data, item_data, resource_data, monster_data)
 
     scheduler = ActionScheduler(api)
     planner = ActionPlanner(world_state)
 
-    characters = await api.get_characters()
-    for character in characters["data"]:
+    for character in character_data:
         scheduler.add_character(character, world_state)
 
     # Run some starting commands

@@ -52,6 +52,7 @@ class ItemQuantity:
             self.min = -math.inf
         
 ARMOUR_SLOTS = ["shield", "helmet", "body_armor", "leg_armor", "boots", "ring", "amulet"]
+SKILLS = ["mining", "woodcutting", "fishing", "weaponcrafting", "gearcrafting", "jewelrycrafting", "cooking", "alchemy"]
 
 class ItemSlot(Enum):
     WEAPON = "weapon"

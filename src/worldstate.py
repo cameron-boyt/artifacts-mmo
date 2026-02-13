@@ -5,7 +5,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Dict, List, Set, Tuple, Any
 from math import floor, ceil
-
+from itertools import product
 from src.helpers import *
 
 type LocationSet = Set[Tuple[int, int]]
@@ -190,20 +190,6 @@ class WorldState:
     def is_weapon(self, item: str) -> bool:
         return self.is_an_item(item) and self._item_data[item]["type"] == "weapon"
         
-    def get_best_weapon_for_monster_in_bank(self, character: dict, monster: str) -> Tuple[str, int] | None:
-        weapons = [
-            item for item in self._bank_data 
-            if self.is_weapon(item)
-            and self.character_meets_conditions(character, self._item_data[item]["conditions"])
-        ]
-
-        if len(weapons) > 0:
-            weapon_damage = [(weapon, self.get_attack_power_of_weapon(weapon, monster)) for weapon in weapons]
-            best_weapon = max(weapon_damage, key=lambda w: w[1])
-            return best_weapon
-        else:
-            return None
-        
     def get_attack_power_of_weapon(self, weapon: str, monster: str) -> int:
         if not self.is_equipment(weapon):
             raise KeyError(f"{weapon} is not equipment.")
@@ -237,6 +223,216 @@ class WorldState:
         
     def is_armour(self, item: str) -> bool:
         return self.is_an_item(item) and self._item_data[item]["type"] in ARMOUR_SLOTS
+        
+    def get_defence_power_of_armour(self, armour: str, monster: str) -> int:
+        if not self.is_armour(armour):
+            raise KeyError(f"{armour} is not armour.")
+        
+        # take into account weapon
+        # calcualte turns to kill monster
+        # from that get armour the optimises min damage taken
+
+        # if further damage inc / receive damage reduction doesn't help, opt for utilsty stats like wisdom
+
+        # alternative, maximise wisdom for skilling
+        
+        monster_data = self._monster_data[monster]
+        armour_data = self.get_item_info(armour)
+
+        def_power = 0
+        dmg_bonus = 1
+        wisdom = 0
+
+        for effect in armour_data["effects"]:
+            match effect["code"]:
+                case "hp":
+                    def_power += effect["value"]
+
+                case "dmg":
+                    dmg_bonus += effect["value"]
+                    
+                case "res_air":
+                    def_power += effect["value"] / 100 * int(monster_data["attack_air"])
+
+                case "res_water":
+                    def_power += effect["value"] / 100 * int(monster_data["attack_water"])
+
+                case "res_earth":
+                    def_power += effect["value"] / 100 * int(monster_data["attack_earth"])
+
+                case "res_fire":
+                    def_power += effect["value"] / 100 * int(monster_data["attack_fire"])
+
+                case "attack_air":
+                    dmg_bonus += (1 + effect["value"] / 100) * (1 + int(monster_data["res_air"]) / 100)
+
+                case "attack_water":
+                    dmg_bonus += (1 + effect["value"] / 100) * (1 + int(monster_data["res_water"]) / 100)
+
+                case "attack_earth":
+                    dmg_bonus += (1 + effect["value"] / 100) * (1 + int(monster_data["res_earth"]) / 100)
+
+                case "attack_fire":
+                    dmg_bonus += (1 + effect["value"] / 100) * (1 + int(monster_data["res_fire"]) / 100)
+
+                case "dmg_air":
+                    dmg_bonus += effect["value"] / 100
+
+                case "dmg_water":
+                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_water"]) / 100))
+
+                case "dmg_earth":
+                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_earth"]) / 100))
+
+                case "dmg_fire":
+                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
+
+                case "wisdom":
+                    wisdom = floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
+
+                case "mining" | "woodcutting" | "fishing" | "alchemy":
+                    pass
+                    
+                case _:
+                    raise Exception(f"Unknown equipment effect: {effect["code"]}.")
+
+        return def_power
+    
+    def get_best_loadout_for_task(self, character: dict, task: str, target: str) -> dict:
+        if task == "fighting":
+            return self.get_best_loadout_for_fighting(character, target)
+        elif task == "gathering":
+            #return self.get_best_loadout_for_gathering(character, target)
+            pass
+        else:
+            raise Exception(f"Unknown loadout task type: {task}.")
+
+    def get_best_loadout_for_fighting(self, character: dict, monster: str) -> dict:
+        equipment = {
+            "weapons": [],
+            "helmet": [],
+            "shield": [],
+            "body_armor": [],
+            "leg_armor": [],
+            "boots": [],
+            "amulet": [],
+            "ring": []
+        }
+
+        for item in self._bank_data:
+            item_data = self._item_data[item]
+
+            if not self.character_meets_conditions(character, item_data["conditions"]):
+                continue
+
+            if self.is_weapon(item):
+                # Construct stat vector
+                relevant_stats = ["attack_air", "attack_water", "attack_earth", "attack_fire", "critical_strike"]
+                weapon_stats = { "code": item }
+                for stat in relevant_stats:
+                    matching_stats = [effect for effect in item_data["effects"] if effect["code"] == stat]
+                    if len(matching_stats) == 1:
+                        weapon_stats[stat] = matching_stats[0]["value"]
+                    else:
+                        weapon_stats[stat] = 0
+
+                equipment["weapons"].append(weapon_stats)
+
+            if self.is_armour(item):
+                # Construct stat vector
+                relevant_stats = [
+                    "hp",
+                    "res_air", "res_water", "res_earth", "res_fire",
+                    "dmg", "dmg_air", "dmg_water", "dmg_earth", "dmg_fire", "critical_strike"
+                ]
+                armour_stats = { "code": item }
+                for stat in relevant_stats:
+                    matching_stats = [effect for effect in item_data["effects"] if effect["code"] == stat]
+                    if len(matching_stats) == 1:
+                        armour_stats[stat] = matching_stats[0]["value"]
+                    else:
+                        armour_stats[stat] = 0
+                equip_slot = self.get_equip_slot_for_item(item)
+                equipment[equip_slot].append(armour_stats)
+
+        # Prune equipment sets
+        # for slot, items in equipment.items():
+        #     print(slot, item)
+
+        # Create all equipment combinations
+        slot_item_lists = [(items if items else [None]) for items in equipment.values()]
+        loadouts = list(product(*slot_item_lists))
+
+        # Create a dummy character that has no items equipped
+        dummy_char = dict(character)
+
+        relevant_stats = [
+            "res_air", "res_water", "res_earth", "res_fire",
+            "attack_air", "attack_water", "attack_earth", "attack_fire", "critical_strike",
+            "dmg", "dmg_air", "dmg_water", "dmg_earth", "dmg_fire", "critical_strike"
+        ]
+
+        # Reset all stats
+        for stat in relevant_stats:
+            dummy_char[stat] = 0
+
+        # Rewind added hp
+        for slot in ARMOUR_SLOTS:
+            if armour_piece := dummy_char.get(slot):
+                armour_data = self.get_item_info(armour_piece)
+                hp_effect = [effect for effect in armour_data["effects"] if effect["code"] == "hp"]
+                if hp_effect:
+                    dummy_char["max_hp"] -= hp_effect[0]["value"]
+
+        # For each loadout, apply the stats and then simulate a fight.
+        loadout_ratings = {}
+        for i, loadout in enumerate(loadouts):
+            geared_char = dict(dummy_char)
+            for item in loadout:
+                if item is None:
+                    continue
+
+                for stat, value in item.items():
+                    if stat == "code":
+                        continue
+
+                    # max_hp adiditons are called "hp"
+                    if stat == "hp":
+                        geared_char["max_hp"] += value
+                    else:
+                        geared_char[stat] += value
+
+            # Set hp to max
+            geared_char["hp"] = geared_char["max_hp"
+                                            ]
+            # Simulate fight and rate the loadout:
+            win, turn_count, hp_lost = self.simulate_fight_against_monster(geared_char, monster)
+            loadout_ratings[i] = (win, turn_count, hp_lost)
+
+        # Sort loadouts
+        sorted_loadouts = sorted(loadout_ratings.items(), key=lambda i: i[1], reverse=True)
+
+        best_loadout = loadouts[sorted_loadouts[0][0]]
+
+        # Convert the loadout into a listof items
+        gear_list = [item["code"] for item in best_loadout if item is not None]
+        return gear_list
+        
+    def get_best_weapon_for_monster_in_bank(self, character: dict, monster: str) -> Tuple[str, int] | None:
+        weapons = [
+            item for item in self._bank_data 
+            if self.is_weapon(item)
+            and self.character_meets_conditions(character, self._item_data[item]["conditions"])
+        ]
+
+        if len(weapons) > 0:
+            weapon_damage = [(weapon, self.get_attack_power_of_weapon(weapon, monster)) for weapon in weapons]
+            best_weapon = max(weapon_damage, key=lambda w: w[1])
+            return best_weapon
+        else:
+            return None
+
+    
         
     def get_best_armour_for_monster_in_bank(self, character: dict, monster: str) -> Dict[str, Tuple[str, int]] | None:
         armours = [
@@ -285,77 +481,6 @@ class WorldState:
             return armour_choices_final
         else:
             return {}
-        
-    def get_defence_power_of_armour(self, armour: str, monster: str) -> int:
-        if not self.is_equipment(armour):
-            raise KeyError(f"{armour} is not equipment.")
-        
-        # take into account weapon
-        # calcualte turns to kill monster
-        # from that get armour the optimises min damage taken
-
-        # if further damage inc / receive damage reduction doesn't help, opt for utilsty stats like wisdom
-
-        # alternative, maximise wisdom for skilling
-        
-        monster_data = self._monster_data[monster]
-        armour_data = self.get_item_info(armour)
-
-        def_power = 0
-        dmg_bonus = 1
-        wisdom = 0
-
-        for effect in armour_data["effects"]:
-            match effect["code"]:
-                case "hp":
-                    def_power += effect["value"]
-
-                case "dmg":
-                    dmg_bonus += effect["value"]
-                    
-                case "res_air":
-                    def_power += (1 + effect["value"] / 100) * int(monster_data["attack_air"])
-
-                case "res_water":
-                    def_power += (1 + effect["value"] / 100) * int(monster_data["attack_water"])
-
-                case "res_earth":
-                    def_power += (1 + effect["value"] / 100) * int(monster_data["attack_earth"])
-
-                case "res_fire":
-                    def_power += (1 + effect["value"] / 100) * int(monster_data["attack_fire"])
-
-                case "attack_air":
-                    def_power += effect["value"] / 100
-
-                case "attack_water":
-                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_water"]) / 100))
-
-                case "attack_earth":
-                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_earth"]) / 100))
-
-                case "attack_fire":
-                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
-
-                case "dmg_air":
-                    def_power += effect["value"] / 100
-
-                case "dmg_water":
-                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_water"]) / 100))
-
-                case "dmg_earth":
-                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_earth"]) / 100))
-
-                case "dmg_fire":
-                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
-
-                case "wisdom":
-                    wisdom = floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
-
-                case _:
-                    raise Exception("wtf is this")
-
-        return def_power
         
     def is_food(self, item: str) -> bool:
         # Forbid eating apples :)
@@ -442,13 +567,13 @@ class WorldState:
         locations = self._interactions.monsters[monster]
         return locations
 
-    def simulate_fight_against_monster(self, character: dict, monster: str) -> Tuple[bool, int]:
+    def simulate_fight_against_monster(self, character: dict, monster: str) -> Tuple[bool, int, int]:
         if not self.is_a_monster(monster):
             raise KeyError(f"{monster} is not a monster.")
         
         monster_data = self.get_monster_info(monster)
 
-        damage_dealt, damage_taken = self.calculate_damage_against_character_and_monster(character, monster)
+        damage_dealt, damage_taken = self.calculate_damage_against_character_and_monster(character, monster_data)
         turns_to_kill = monster_data["hp"] // damage_dealt
 
         # If the monster goes first, the character gets hits one additional time
@@ -459,22 +584,22 @@ class WorldState:
         char_damage_taken = turns_to_kill * damage_taken
         fight_win = char_damage_taken < character["hp"]
 
-        return fight_win, turns_to_kill, char_damage_taken
+        return fight_win, -turns_to_kill, -char_damage_taken
 
     def calculate_damage_against_character_and_monster(self, character: dict, monster: dict) -> Tuple[int, int]:
-        character_damage = (
-            round((character["attack_air"] * character["dmg_air"] / 100) * (1 + monster["res_air"] / 100)) + 
-            round((character["attack_water"] * character["dmg_air"] / 100) * (1 + monster["res_water"] / 100)) + 
-            round((character["attack_earth"] * character["dmg_water"] / 100) * (1 + monster["res_earth"] / 100)) + 
-            round((character["attack_fire"] * character["dmg_fire"] / 100) * (1 + monster["res_fire"] / 100))
-        ) * (1 + character["dmg"] / 100)
+        character_damage = round((
+            round((character["attack_air"] * (1 + character["dmg_air"] / 100)) / (1 + monster["res_air"] / 100)) + 
+            round((character["attack_water"] * (1 + character["dmg_air"] / 100)) / (1 + monster["res_water"] / 100)) + 
+            round((character["attack_earth"] * (1 + character["dmg_water"] / 100)) / (1 + monster["res_earth"] / 100)) + 
+            round((character["attack_fire"] * (1 + character["dmg_fire"] / 100)) / (1 + monster["res_fire"] / 100))
+        ) * (1 + character["dmg"] / 100) * 1.5 * (1 + character["critical_strike"] / 100))
 
-        monster_damage = (
-            round((monster["attack_air"] * monster["dmg_air"] / 100) * (1 + character["res_air"] / 100)) + 
-            round((monster["attack_water"] * monster["dmg_air"] / 100) * (1 + character["res_water"] / 100)) + 
-            round((monster["attack_earth"] * monster["dmg_water"] / 100) * (1 + character["res_earth"] / 100)) + 
-            round((monster["attack_fire"] * monster["dmg_fire"] / 100) * (1 + character["res_fire"] / 100))
-        )
+        monster_damage = round((
+            round(monster["attack_air"] / (1 + character["res_air"] / 100)) + 
+            round(monster["attack_water"] / (1 + character["res_water"] / 100)) + 
+            round(monster["attack_earth"] / (1 + character["res_earth"] / 100)) + 
+            round(monster["attack_fire"]  / (1 + character["res_fire"] / 100))
+        ) * 1.5 * (1 + monster["critical_strike"] / 100))
 
         return character_damage, monster_damage
     

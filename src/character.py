@@ -251,7 +251,7 @@ class CharacterAgent:
         elif task_type == "crafting":
             return self.world_state.item_is_craftable(self.char_data["task"])
         else:
-            raise Exception("unknown task type")
+            raise Exception(f"Unknown task type: {task_type}.")
     
     def has_completed_task(self) -> bool:
         return self.char_data["task_progress"] == self.char_data["task_total"]
@@ -261,33 +261,12 @@ class CharacterAgent:
         return len(equip_queue) > 0
     
     def has_skill_level(self, skill, level) -> bool:
-        match skill:
-            case "mining":
-                return self.char_data["mining_level"] >= level
-            
-            case "woodcutting":
-                return self.char_data["woodcutting_level"] >= level
-            
-            case "fishing":
-                return self.char_data["fishing_level"] >= level
-            
-            case "weaponcrafting":
-                return self.char_data["weaponcrafting_level"] >= level
-            
-            case "gearcrafting":
-                return self.char_data["gearcrafting_level"] >= level
-            
-            case "jewelrycrafting":
-                return self.char_data["jewelrycrafting_level"] >= level
-            
-            case "cooking":
-                return self.char_data["cooking_level"] >= level
-            
-            case "alchemy":
-                return self.char_data["alchemy_level"] >= level
-
-            case "character":
-                return self.char_data["level"] >= level
+        if skill in SKILLS:
+            return self.char_data[f"{skill}_level"] >= level
+        elif skill == "character":
+            return self.char_data["level"] >= level
+        else:
+            raise Exception(f"Unknown skill: {skill}.")
 
     ## Action Performance
     async def perform(self, action: Action) -> ActionOutcome:
@@ -569,4 +548,3 @@ class CharacterAgent:
                 
                 case _:
                     raise NotImplementedError(f"Unknown detail {api_result.detail}.")
-
