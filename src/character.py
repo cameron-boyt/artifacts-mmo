@@ -349,50 +349,22 @@ class CharacterAgent:
             case CharacterAction.BANK_WITHDRAW_ITEM:
                 items_to_withdraw = []
 
-                match action.params.get("preset", "none"):
-                    case "gathering":
+                match preset := action.params.get("preset", "none"):
+                    case "gathering" | "fighting":
                         if on_task := action.params.get("on_task", False): 
-                            resource = self.char_data["task"]
-                            skill = self.world_state.get_gather_skill_for_resource(resource)
+                            target = self.char_data["task"]
+                        else:
+                            target = action.params.get("sub_preset")
 
-                        if on_task or (skill := action.params.get("sub_preset")):
-                            if best_tool := self.world_state.get_best_tool_for_skill_in_bank(self.char_data, skill):
-                                # If current tool is same or better, don't bother withdrawing
-                                equipped_item = self.char_data["weapon_slot"]
-                                if (not equipped_item or (equipped_item and self.world_state.get_gather_power_of_tool(equipped_item, skill) < best_tool[1])):
-                                    items_to_withdraw = [{ "code": best_tool[0], "quantity": 1 }]
-                                    self.context["equip_queue"].append({ "code": best_tool[0], "slot": "weapon" })
-                        
-                        if not items_to_withdraw:
-                            return ActionOutcome.CANCEL
-                            
-                    case "fighting":
-                        if on_task := action.params.get("on_task", False): 
-                            monster = self.char_data["task"]
-                        else:    
-                            monster = action.params.get("sub_preset")
+                        if loadout := self.world_state.get_best_loadout_for_task(self.char_data, preset, target):
+                            for item in loadout:
+                                # If the item is already equipped, skip
+                                if any([equipped == item for slot, equipped in self.char_data.items() if "slot" in slot]):
+                                    continue
 
-                        items_to_withdraw = []
-
-                        if best_weapon := self.world_state.get_best_weapon_for_monster_in_bank(self.char_data, monster):
-                            # If current weapon is same or better, don't bother withdrawing
-                            equipped_item = self.char_data["weapon_slot"]
-                            if not equipped_item or (equipped_item and self.world_state.get_attack_power_of_weapon(equipped_item, monster) < best_weapon[1]):
-                                items_to_withdraw.extend([{ "code": best_weapon[0], "quantity": 1 }])
-                                self.context["equip_queue"].append({ "code": best_weapon[0], "slot": "weapon" })
-
-                        if best_armour := self.world_state.get_best_armour_for_monster_in_bank(self.char_data, monster):
-                            for armour_type, armour in best_armour.items():
-                                if armour:
-                                    # If current armour is same or better, don't bother withdrawing
-                                    item_slot = f"{armour_type}_slot"
-                                    equipped_item = self.char_data[item_slot]
-                                    if not equipped_item or (equipped_item and self.world_state.get_defence_power_of_armour(equipped_item, monster) < armour[1]):
-                                        items_to_withdraw.extend([{ "code": armour[0], "quantity": 1 }])
-                                        self.context["equip_queue"].append({ "code": armour[0], "slot": armour_type })
-
-                        if not items_to_withdraw:
-                            return ActionOutcome.CANCEL
+                                items_to_withdraw.extend([{ "code": item, "quantity": 1 }])
+                                item_slot = self.world_state.get_equip_slot_for_item(item)
+                                self.context["equip_queue"].append({ "code": item, "slot": item_slot })
                         
                     case "on_task":
                         task_item = self.char_data["task"]

@@ -133,7 +133,7 @@ async def main():
     api = APIClient(base_url=BASE_URL, api_key=TOKEN)
 
     GET_API_DATA = False
-    bank_data = await get_bank_data(api, GET_API_DATA)
+    bank_data = await get_bank_data(api, True)
     item_data = await get_item_data(api, GET_API_DATA)
     map_data = await get_map_data(api, GET_API_DATA)
     resource_data = await get_resource_data(api, GET_API_DATA)
@@ -149,11 +149,11 @@ async def main():
         scheduler.add_character(character, world_state)
 
     # Run some starting commands
-    parse_input(planner, scheduler, world_state, "Cameron complete-tasks items")
+    parse_input(planner, scheduler, world_state, "Cameron craft-or-gather spruce_plank max")
     parse_input(planner, scheduler, world_state, "Maett complete-tasks monsters")
     parse_input(planner, scheduler, world_state, "Oscar complete-tasks monsters")
-    parse_input(planner, scheduler, world_state, "Jayne complete-tasks items")
-    parse_input(planner, scheduler, world_state, "Moira complete-tasks items")
+    parse_input(planner, scheduler, world_state, "Jayne craft-or-gather iron_bar max")
+    parse_input(planner, scheduler, world_state, "Moira craft-or-gather cooked_gudgeon max")
 
     while True:
         c = await asyncio.to_thread(input, "Enter Command: ")

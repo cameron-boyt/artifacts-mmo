@@ -378,9 +378,14 @@ class ActionPlanner:
                 )
 
             case Intention.CRAFT_OR_GATHER_INTERMEDIARIES:
-                craft_item = intent.params.get("item")
-                craft_max = intent.params.get("as_many_as_possible", False)
-                craft_qty = 1 if craft_max else intent.params.get("quantity", 0)
+                if intent.params.get("on_task", False):
+                    craft_item = intent.params.get("item")
+                    craft_max = intent.params.get("as_many_as_possible", False)
+                    craft_qty = 1 if craft_max else intent.params.get("quantity", 0)
+                else:
+                    craft_item = intent.params.get("item")
+                    craft_max = intent.params.get("as_many_as_possible", False)
+                    craft_qty = 1 if craft_max else intent.params.get("quantity", 0)
 
                 # Construct the list of gather fallback actions
                 required_materials = self.world_state.get_crafting_materials_for_item(craft_item, craft_qty)

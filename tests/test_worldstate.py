@@ -566,4 +566,9 @@ def test__get_task_master_locations(world_state: WorldState):
 def test__get_best_loadout_for_fighting(world_state: WorldState):
     result = world_state.get_best_loadout_for_task({ "hp": 1, "max_hp": 100, "level": 5, "initiative": 100}, "fighting", "blue_slime")
     assert False
+
+
+def test__get_best_loadout_for_gathering(world_state: WorldState):
+    result = world_state.get_best_loadout_for_task({ "hp": 1, "max_hp": 100, "level": 5, "initiative": 100}, "gathering", "iron_ore")
+    assert False
     

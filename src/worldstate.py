@@ -121,17 +121,7 @@ class WorldState:
         
         raise KeyError(f"{skill} is not a skill.")
     
-    # Equipment Checkers
-    def is_equipment(self, item: str) -> bool:
-        return self.is_an_item(item) and not self.get_item_info(item)["type"] == "resource"
-    
-    def get_equip_slot_for_item(self, item: str) -> str:
-        if not self.is_equipment(item):
-            raise KeyError(f"{item} is not equipment.")
-        
-        return self._item_data[item]["type"]
-    
-    def character_meets_conditions(self, character: dict, conditions: list) -> bool:
+    def character_meets_conditions_for_item(self, character: dict, conditions: list) -> bool:
         for condition in conditions:
             match condition["code"]:
                 case "level" | "mining_level" | "woodcutting_level" | "fishing_level" | "weaponcrafting_level" | \
@@ -155,7 +145,16 @@ class WorldState:
                 return False
             
         return True
-
+    
+    # Equipment Checkers
+    def is_equipment(self, item: str) -> bool:
+        return self.is_an_item(item) and not self.get_item_info(item)["type"] == "resource"
+    
+    def get_equip_slot_for_item(self, item: str) -> str:
+        if not self.is_equipment(item):
+            raise KeyError(f"{item} is not equipment.")
+        
+        return self._item_data[item]["type"]
     
     def is_tool(self, item: str) -> bool:
         return self.is_an_item(item) and self._item_data[item]["subtype"] == "tool"
@@ -165,7 +164,7 @@ class WorldState:
             item for item in self._bank_data 
             if self.is_tool(item)
             and any(effect["code"] == skill for effect in self._item_data[item]["effects"])
-            and self.character_meets_conditions(character, self._item_data[item]["conditions"])
+            and self.character_meets_conditions_for_item(character, self._item_data[item]["conditions"])
         ]
 
         if len(tools) > 0:
@@ -190,126 +189,86 @@ class WorldState:
     def is_weapon(self, item: str) -> bool:
         return self.is_an_item(item) and self._item_data[item]["type"] == "weapon"
         
-    def get_attack_power_of_weapon(self, weapon: str, monster: str) -> int:
-        if not self.is_equipment(weapon):
-            raise KeyError(f"{weapon} is not equipment.")
-        
-        monster_data = self._monster_data[monster]
-        weapon_data = self.get_item_info(weapon)
-
-        power = 0
-        crit_chance = 0
-        crit_damage_mult = 1.5
-
-        for effect in weapon_data["effects"]:
-            match effect["code"]:
-                case "attack_air":
-                    power += floor(effect["value"] / (1 + int(monster_data["res_air"]) / 100))
-
-                case "attack_water":
-                    power += floor(effect["value"] / (1 + int(monster_data["res_water"]) / 100))
-
-                case "attack_earth":
-                    power += floor(effect["value"] / (1 + int(monster_data["res_earth"]) / 100))
-
-                case "attack_fire":
-                    power += floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
-
-                case "critical_strike":
-                    crit_chance = effect["value"] / 100
-
-        power += (power * crit_damage_mult * crit_chance)
-        return power
-        
     def is_armour(self, item: str) -> bool:
         return self.is_an_item(item) and self._item_data[item]["type"] in ARMOUR_SLOTS
-        
-    def get_defence_power_of_armour(self, armour: str, monster: str) -> int:
-        if not self.is_armour(armour):
-            raise KeyError(f"{armour} is not armour.")
-        
-        # take into account weapon
-        # calcualte turns to kill monster
-        # from that get armour the optimises min damage taken
-
-        # if further damage inc / receive damage reduction doesn't help, opt for utilsty stats like wisdom
-
-        # alternative, maximise wisdom for skilling
-        
-        monster_data = self._monster_data[monster]
-        armour_data = self.get_item_info(armour)
-
-        def_power = 0
-        dmg_bonus = 1
-        wisdom = 0
-
-        for effect in armour_data["effects"]:
-            match effect["code"]:
-                case "hp":
-                    def_power += effect["value"]
-
-                case "dmg":
-                    dmg_bonus += effect["value"]
-                    
-                case "res_air":
-                    def_power += effect["value"] / 100 * int(monster_data["attack_air"])
-
-                case "res_water":
-                    def_power += effect["value"] / 100 * int(monster_data["attack_water"])
-
-                case "res_earth":
-                    def_power += effect["value"] / 100 * int(monster_data["attack_earth"])
-
-                case "res_fire":
-                    def_power += effect["value"] / 100 * int(monster_data["attack_fire"])
-
-                case "attack_air":
-                    dmg_bonus += (1 + effect["value"] / 100) * (1 + int(monster_data["res_air"]) / 100)
-
-                case "attack_water":
-                    dmg_bonus += (1 + effect["value"] / 100) * (1 + int(monster_data["res_water"]) / 100)
-
-                case "attack_earth":
-                    dmg_bonus += (1 + effect["value"] / 100) * (1 + int(monster_data["res_earth"]) / 100)
-
-                case "attack_fire":
-                    dmg_bonus += (1 + effect["value"] / 100) * (1 + int(monster_data["res_fire"]) / 100)
-
-                case "dmg_air":
-                    dmg_bonus += effect["value"] / 100
-
-                case "dmg_water":
-                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_water"]) / 100))
-
-                case "dmg_earth":
-                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_earth"]) / 100))
-
-                case "dmg_fire":
-                    dmg_bonus += floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
-
-                case "wisdom":
-                    wisdom = floor(effect["value"] / (1 + int(monster_data["res_fire"]) / 100))
-
-                case "mining" | "woodcutting" | "fishing" | "alchemy":
-                    pass
-                    
-                case _:
-                    raise Exception(f"Unknown equipment effect: {effect["code"]}.")
-
-        return def_power
     
     def get_best_loadout_for_task(self, character: dict, task: str, target: str) -> dict:
         if task == "fighting":
-            return self.get_best_loadout_for_fighting(character, target)
+            relevant_weapon_stats = ["attack_air", "attack_water", "attack_earth", "attack_fire", "critical_strike"]
+            relevant_armour_stats = [
+                "hp", "res_air", "res_water", "res_earth", "res_fire",
+                "dmg", "dmg_air", "dmg_water", "dmg_earth", "dmg_fire", "critical_strike",
+                "initiative", "haste", "wisdom", "prospecting"
+            ]
+            evaluation_function = self._evaluate_loadout_for_fighting
         elif task == "gathering":
-            #return self.get_best_loadout_for_gathering(character, target)
-            pass
+            relevant_weapon_stats = ["mining", "woodcutting", "fishing", "alchemy"]
+            relevant_armour_stats = ["wisdom", "prospecting"]
+            evaluation_function = self._evaluate_loadout_for_gathering
         else:
             raise Exception(f"Unknown loadout task type: {task}.")
+        
+        all_relevant_stats = [*relevant_weapon_stats, *relevant_armour_stats]
 
-    def get_best_loadout_for_fighting(self, character: dict, monster: str) -> dict:
+        loadouts = self._generate_equipment_loadouts(character, relevant_weapon_stats, relevant_armour_stats)
+        dummy_char = self._generate_dummy_char(character, all_relevant_stats)
+
+        # For each loadout, apply the stats and then simulate a fight.
+        loadout_ratings = {}
+        for i, loadout in enumerate(loadouts):
+            geared_char = self._generate_geared_char(dummy_char, loadout)
+
+            # Simulate fight and rate the loadout:
+            loadout_ratings[i] = evaluation_function(geared_char, target)
+
+        # Sort loadouts
+        sorted_loadouts = sorted(loadout_ratings.items(), key=lambda i: i[1], reverse=True)
+        best_loadout = loadouts[sorted_loadouts[0][0]]
+
+        # Convert the loadout into a listof items
+        gear_list = [item["code"] for item in best_loadout if item is not None]
+        return gear_list
+        
+    def _generate_dummy_char(self, character: dict, stats_to_rewind: list[str]) -> dict:
+        """Create a dummy character from the provided character stats as if it had nothing equipped."""
+        dummy_char = dict(character)
+
+        # Reset stats
+        for stat in stats_to_rewind:
+            dummy_char[stat] = 0
+
+        # Rewind hp
+        dummy_char["max_hp"] = 120 + (dummy_char["level"] - 1) * 5
+
+        # Remove active effects (we'll actually be treating these as normal stats instead for ease of computation)
+        dummy_char["effects"] = []
+
+        return dummy_char
+    
+    def _generate_geared_char(self, character: dict, loadout: dict) -> dict:
+        """Given a loadout of gear, apply their stats to a char and generate a geared mock."""
+        geared_char = dict(character)
+        for item in loadout:
+            if item is None:
+                continue
+
+            for stat, value in item.items():
+                if stat == "code":
+                    continue
+
+                # max_hp additions are called "hp"
+                if stat == "hp":
+                    geared_char["max_hp"] += value
+                else:
+                    geared_char[stat] += value
+
+        # Set hp to max
+        geared_char["hp"] = geared_char["max_hp"]
+        return geared_char
+    
+    def _generate_equipment_loadouts(self, character: dict, relevant_weapon_stats: list[str], relevant_armour_stats: list[str]) -> dict:
         equipment = {
-            "weapons": [],
+            "weapon": [],
             "helmet": [],
             "shield": [],
             "body_armor": [],
@@ -319,41 +278,52 @@ class WorldState:
             "ring": []
         }
 
+        # Take into account items already equipped
+        items_to_check = set()
+        for item in character["inventory"]:
+            if item["code"] != "":
+                items_to_check.add(item["code"])
+
         for item in self._bank_data:
+                items_to_check.add(item)
+
+        # Determine which items can be equipped and have relevant stats for consideration
+        for item in items_to_check:
             item_data = self._item_data[item]
 
-            if not self.character_meets_conditions(character, item_data["conditions"]):
+            if not self.character_meets_conditions_for_item(character, item_data["conditions"]):
                 continue
 
             if self.is_weapon(item):
-                # Construct stat vector
-                relevant_stats = ["attack_air", "attack_water", "attack_earth", "attack_fire", "critical_strike"]
                 weapon_stats = { "code": item }
-                for stat in relevant_stats:
+                has_relevant_stats = False
+
+                for stat in relevant_weapon_stats:
                     matching_stats = [effect for effect in item_data["effects"] if effect["code"] == stat]
                     if len(matching_stats) == 1:
+                        has_relevant_stats = True
                         weapon_stats[stat] = matching_stats[0]["value"]
                     else:
                         weapon_stats[stat] = 0
 
-                equipment["weapons"].append(weapon_stats)
+                if has_relevant_stats:
+                    equipment["weapon"].append(weapon_stats)
 
             if self.is_armour(item):
-                # Construct stat vector
-                relevant_stats = [
-                    "hp",
-                    "res_air", "res_water", "res_earth", "res_fire",
-                    "dmg", "dmg_air", "dmg_water", "dmg_earth", "dmg_fire", "critical_strike"
-                ]
                 armour_stats = { "code": item }
-                for stat in relevant_stats:
+                has_relevant_stats = False
+
+                for stat in relevant_armour_stats:
                     matching_stats = [effect for effect in item_data["effects"] if effect["code"] == stat]
                     if len(matching_stats) == 1:
+                        has_relevant_stats = True
                         armour_stats[stat] = matching_stats[0]["value"]
                     else:
                         armour_stats[stat] = 0
-                equip_slot = self.get_equip_slot_for_item(item)
-                equipment[equip_slot].append(armour_stats)
+
+                if has_relevant_stats:
+                    equip_slot = self.get_equip_slot_for_item(item)
+                    equipment[equip_slot].append(armour_stats)
 
         # Prune equipment sets
         # for slot, items in equipment.items():
@@ -361,127 +331,33 @@ class WorldState:
 
         # Create all equipment combinations
         slot_item_lists = [(items if items else [None]) for items in equipment.values()]
+
+        # Add another set of rings since we can equip two of them!
+        slot_item_lists.extend([equipment["ring"] if equipment["ring"] else [None]])
+
         loadouts = list(product(*slot_item_lists))
 
-        # Create a dummy character that has no items equipped
-        dummy_char = dict(character)
+        # Check we have enough equipment quantity for both rings (lists 7 and 8)
+        valid_loadouts = []
 
-        relevant_stats = [
-            "res_air", "res_water", "res_earth", "res_fire",
-            "attack_air", "attack_water", "attack_earth", "attack_fire", "critical_strike",
-            "dmg", "dmg_air", "dmg_water", "dmg_earth", "dmg_fire", "critical_strike"
-        ]
+        for loadout in loadouts:
+            if (
+                loadout[7] and loadout[8] and
+                loadout[7]["code"] == loadout[8]["code"] and 
+                self.get_amount_of_item_in_bank(loadout[7]["code"]) < 2
+            ):
+                continue
+                
+            valid_loadouts.append(loadout)
 
-        # Reset all stats
-        for stat in relevant_stats:
-            dummy_char[stat] = 0
-
-        # Rewind added hp
-        for slot in ARMOUR_SLOTS:
-            if armour_piece := dummy_char.get(slot):
-                armour_data = self.get_item_info(armour_piece)
-                hp_effect = [effect for effect in armour_data["effects"] if effect["code"] == "hp"]
-                if hp_effect:
-                    dummy_char["max_hp"] -= hp_effect[0]["value"]
-
-        # For each loadout, apply the stats and then simulate a fight.
-        loadout_ratings = {}
-        for i, loadout in enumerate(loadouts):
-            geared_char = dict(dummy_char)
-            for item in loadout:
-                if item is None:
-                    continue
-
-                for stat, value in item.items():
-                    if stat == "code":
-                        continue
-
-                    # max_hp adiditons are called "hp"
-                    if stat == "hp":
-                        geared_char["max_hp"] += value
-                    else:
-                        geared_char[stat] += value
-
-            # Set hp to max
-            geared_char["hp"] = geared_char["max_hp"
-                                            ]
-            # Simulate fight and rate the loadout:
-            win, turn_count, hp_lost = self.simulate_fight_against_monster(geared_char, monster)
-            loadout_ratings[i] = (win, turn_count, hp_lost)
-
-        # Sort loadouts
-        sorted_loadouts = sorted(loadout_ratings.items(), key=lambda i: i[1], reverse=True)
-
-        best_loadout = loadouts[sorted_loadouts[0][0]]
-
-        # Convert the loadout into a listof items
-        gear_list = [item["code"] for item in best_loadout if item is not None]
-        return gear_list
-        
-    def get_best_weapon_for_monster_in_bank(self, character: dict, monster: str) -> Tuple[str, int] | None:
-        weapons = [
-            item for item in self._bank_data 
-            if self.is_weapon(item)
-            and self.character_meets_conditions(character, self._item_data[item]["conditions"])
-        ]
-
-        if len(weapons) > 0:
-            weapon_damage = [(weapon, self.get_attack_power_of_weapon(weapon, monster)) for weapon in weapons]
-            best_weapon = max(weapon_damage, key=lambda w: w[1])
-            return best_weapon
-        else:
-            return None
-
+        return valid_loadouts
     
-        
-    def get_best_armour_for_monster_in_bank(self, character: dict, monster: str) -> Dict[str, Tuple[str, int]] | None:
-        armours = [
-            item for item in self._bank_data 
-            if self.is_armour(item)
-            and self.character_meets_conditions(character, self._item_data[item]["conditions"])
-        ]
-
-        if len(armours) > 0:
-            armour_choices = {
-                "helmet": [],
-                "shield": [],
-                "body_armor": [],
-                "leg_armor": [],
-                "boots": [],
-                "amulet": [],
-                "ring": []
-            }
-
-            for armour in armours:
-                armour_data = self.get_item_info(armour)
-                armour_type = armour_data["type"]
-                def_power = self.get_defence_power_of_armour(armour, monster)
-                armour_choices[armour_type].append((armour, def_power))
-            
-            # Since we can equip more than 1 ring, check if we have a second of each. if so, chuck it in the list.
-            rings_to_add = []
-            for ring in armour_choices["ring"]:
-                if self.get_amount_of_item_in_bank(ring[0]) > 1:
-                    rings_to_add.append(ring)
-
-            armour_choices["ring"].extend(rings_to_add)
-
-            armour_choices_final = {}
-            for k, v in armour_choices.items():
-                if len(v) > 0:
-                    if k == "ring":
-                        rings = sorted(v, key=lambda a: a[1])[:2]
-                        armour_choices_final["ring1"] = rings[0]
-
-                        if len(rings) > 1:
-                            armour_choices_final["ring2"] = rings[1]
-                    else:
-                        armour_choices_final[k] = max(v, key=lambda a: a[1])
-
-            return armour_choices_final
-        else:
-            return {}
-        
+    def _evaluate_loadout_for_gathering(self, character: dict, skill: str) -> Tuple[int]:
+        skill_cooldown_reduction = character[skill]
+        droprate_bonus = character["prospecting"]
+        xp_bonus = character["wisdom"]
+        return -skill_cooldown_reduction, droprate_bonus, xp_bonus
+    
     def is_food(self, item: str) -> bool:
         # Forbid eating apples :)
         return self.is_an_item(item) and self._item_data[item]["subtype"] == "food" and item != "apple"
@@ -490,7 +366,7 @@ class WorldState:
         foods = [
             item for item in self._bank_data 
             if self.is_food(item)
-            and self.character_meets_conditions(character, self._item_data[item]["conditions"])
+            and self.character_meets_conditions_for_item(character, self._item_data[item]["conditions"])
         ]
 
         if len(foods) > 0:
@@ -567,7 +443,7 @@ class WorldState:
         locations = self._interactions.monsters[monster]
         return locations
 
-    def simulate_fight_against_monster(self, character: dict, monster: str) -> Tuple[bool, int, int]:
+    def _evaluate_loadout_for_fighting(self, character: dict, monster: str) -> Tuple[bool, int, int]:
         if not self.is_a_monster(monster):
             raise KeyError(f"{monster} is not a monster.")
         
