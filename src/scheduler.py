@@ -22,7 +22,7 @@ class ActionScheduler:
 
         self.api_client = api_client
         self.agents: dict[str, CharacterAgent] = {}
-        self.queues: dict[str, deque[Action | ActionGroup | ActionControlNode]] = {}
+        self.queues: dict[str, deque[ActionExecutable]] = {}
         self.worker_tasks: dict[str, asyncio.Task] = {}
 
 
@@ -112,23 +112,30 @@ class ActionScheduler:
         return success
 
     async def _process_single_action(self, agent: CharacterAgent, action: Action) -> bool:
-        """Process a single action to be made by an agent, repeating as defined."""        
+        """Process a single action to be made by an agent, repeating as defined."""       
         retry_count = 0
         retry_max = 3
 
         while True:
-            # Wait for the remaining cooldown for the worker
-            remaining_cooldown = max(0, agent.cooldown_expires_at - time.time())
-            if remaining_cooldown > 0:
-                self.logger.debug(f"[{agent.name}] Waiting for cooldown: {round(remaining_cooldown)}s.")
-                await asyncio.sleep(remaining_cooldown)
+            if isinstance(action.type, MetaAction):
+                actor = agent.world_state
+            elif isinstance(action.type, CharacterAction):
+                # Wait for the remaining cooldown for the worker
+                remaining_cooldown = max(0, agent.cooldown_expires_at - time.time())
+                if remaining_cooldown > 0:
+                    self.logger.debug(f"[{agent.name}] Waiting for cooldown: {round(remaining_cooldown)}s.")
+                    await asyncio.sleep(remaining_cooldown)
+
+                actor = agent
+            else:
+                raise Exception("Unknown instance tyoe of action")
 
             # Check for abort
             if agent.abort_actions:
                 return False
                                     
             # Execute the action
-            outcome = await agent.perform(action)
+            outcome = await actor.perform(action)
 
             # Check action result
             match outcome:
@@ -214,7 +221,25 @@ class ActionScheduler:
                         break
 
                 return result
+
+            case ControlOperator.DO_WHILE:
+                # No executions should result in a successful node
+                result = True
+
+                # Check if the repeat condition first, since it's a prerequisite for performing the child nodes
+                while self._evaluate_condition(agent, control_node.condition):
+                    # Check for abort
+                    if agent.abort_actions:
+                        return False
+                        
+                    result = await self._process_node(agent, control_node.action_node)
+
+                    # Break out if the sub node has failed
+                    if not result:
+                        return result
                 
+                return result
+
     def _evaluate_control_branches(self, agent: CharacterAgent, control_node: ActionControlNode) -> Action | ActionGroup | ActionControlNode | None:
         for branch in control_node.branches:
             if self._evaluate_condition(agent, branch[0]):

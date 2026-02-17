@@ -26,7 +26,9 @@ class CharacterAgent:
         self.context = {
             "previous_location": (self.char_data["x"],  self.char_data["y"]),
             "equip_queue": [],
-            "damage_taken_last_fight": self.char_data["max_hp"] -self.char_data["hp"]
+            "damage_taken_last_fight": self.char_data["max_hp"] -self.char_data["hp"],
+            "last_trade": {},
+            "withdrawn_food": ""
         }
         self.world_state = world_state
 
@@ -252,7 +254,9 @@ class CharacterAgent:
         return self.char_data["task"] != ""
     
     def has_task_of_type(self, task_type: str) -> bool:
-        if task_type == "gathering":
+        if task_type == "fighting":
+            return self.world_state.is_a_monster(self.char_data["task"])
+        elif task_type == "gathering":
             return not self.world_state.item_is_craftable(self.char_data["task"])
         elif task_type == "crafting":
             return self.world_state.item_is_craftable(self.char_data["task"])
@@ -291,15 +295,6 @@ class CharacterAgent:
                     if not loc:
                         return ActionOutcome.FAIL
                     
-                    x, y = loc
-                elif action.params.get("on_task", False):
-                    task = self.char_data["task"]
-                    if self.char_data["task_type"] == "monsters":
-                        locations = self.world_state.get_locations_of_monster(task)
-                    elif self.char_data["task_type"] == "resources":
-                        locations = self.world_state.get_locations_of_resource(task)
-                
-                    loc = self._get_closest_location(locations)
                     x, y = loc
                 else:
                     x = action.params["x"]
@@ -342,7 +337,8 @@ class CharacterAgent:
             case CharacterAction.BANK_DEPOSIT_ITEM:
                 match action.params.get("preset", "none"):
                     case "all":
-                        items_to_deposit = [{ "code": item["code"], "quantity": item["quantity"] } for item in self.char_data["inventory"] if item["code"] != '']
+                        exclusions = action.params.get("exclude", [])
+                        items_to_deposit = [{ "code": item["code"], "quantity": item["quantity"] } for item in self.char_data["inventory"] if item["code"] != '' and item["code"] not in exclusions]
                         if not items_to_deposit:
                             return ActionOutcome.CANCEL
                     case _:
@@ -357,10 +353,7 @@ class CharacterAgent:
 
                 match preset := action.params.get("preset", "none"):
                     case "gathering" | "fighting":
-                        if on_task := action.params.get("on_task", False): 
-                            target = self.char_data["task"]
-                        else:
-                            target = action.params.get("sub_preset")
+                        target = action.params.get("sub_preset")
 
                         if loadout := self.world_state.get_best_loadout_for_task(self.char_data, preset, target):
                             for item in loadout:
@@ -371,6 +364,13 @@ class CharacterAgent:
                                 items_to_withdraw.extend([{ "code": item, "quantity": 1 }])
                                 item_slot = self.world_state.get_equip_slot_for_item(item)
                                 self.context["equip_queue"].append({ "code": item, "slot": item_slot })
+
+                        # For fighting presets, also withdraw some food
+                        if preset == "fighting":
+                            item_order = ItemOrder(items=[ItemSelection(item_type=ItemType.FOOD, quantity=ItemQuantity(max=50))])
+                            food_withdrawn = self._construct_item_list(item_order)
+                            self.context["withdrawn_food"] = food_withdrawn[0]["code"]
+                            items_to_withdraw.extend(food_withdrawn)
                         
                     case "on_task":
                         task_item = self.char_data["task"]
@@ -388,13 +388,15 @@ class CharacterAgent:
                 if not items_to_withdraw:
                     return ActionOutcome.CANCEL
 
-                # Reserve the chosen items
-                reservation_id = self.world_state.reserve_bank_items(self.name, items_to_withdraw)
+                if reserve_items := action.params.get("reserve", False):
+                    # Reserve the chosen items
+                    self.world_state.reserve_bank_items(self.name, { item["code"]: item["quantity"] for item in items_to_withdraw })
                 
                 api_result = await self.api_client.bank_withdraw_item(self.name, items_to_withdraw)
 
-                # Clear the item reservation now we've attempted the transaction
-                self.world_state.clear_bank_reservation(self.name, reservation_id)
+                if reserve_items:
+                    # Clear the item reservations now we've attempted the transaction
+                    self.world_state.update_bank_reservations(self.name, { item["code"]: -item["quantity"] for item in items_to_withdraw })
             
             case CharacterAction.BANK_DEPOSIT_GOLD:
                 quantity_to_deposit = action.params.get("quantity", 0)
@@ -484,6 +486,10 @@ class CharacterAgent:
                 new_hp = fight_result_info[0]["final_hp"]
                 self.context["damage_taken_last_fight"] = old_hp - new_hp
                 self.char_data = api_result.response.get("data", {}).get("characters")[0]
+
+            # Check for trade data
+            if trade_data := api_result.response.get("data", {}).get("trade"):
+                self.context["last_trade"] = trade_data
 
             # Update character state
             if new_char_data := api_result.response.get("data", {}).get("character"):

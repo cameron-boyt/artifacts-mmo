@@ -88,6 +88,9 @@ class APIClient:
             except httpx.ReadTimeout:
                 self.logger.warning(f"Request timed out for '{url}', attempt {i} of 3.")
                 continue
+            except httpx.ConnectTimeout:
+                self.logger.warning(f"Request timed out for '{url}', attempt {i} of 3.")
+                continue
 
             break
 

@@ -149,11 +149,11 @@ async def main():
         scheduler.add_character(character, world_state)
 
     # Run some starting commands
-    parse_input(planner, scheduler, world_state, "Cameron complete-tasks items")
-    parse_input(planner, scheduler, world_state, "Maett complete-tasks monsters")
-    parse_input(planner, scheduler, world_state, "Oscar complete-tasks monsters")
-    parse_input(planner, scheduler, world_state, "Jayne complete-tasks items")
-    parse_input(planner, scheduler, world_state, "Moira complete-tasks items")
+    parse_input(planner, scheduler, world_state, "Cameron gather-forever copper_ore")
+    parse_input(planner, scheduler, world_state, "Maett gather-forever copper_ore")
+    parse_input(planner, scheduler, world_state, "Oscar gather-forever copper_ore")
+    parse_input(planner, scheduler, world_state, "Jayne gather-forever copper_ore")
+    parse_input(planner, scheduler, world_state, "Moira gather-forever copper_ore")
 
     while True:
         c = await asyncio.to_thread(input, "Enter Command: ")
@@ -289,28 +289,14 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: World
 
         # create combo actions
         case 'gather-forever':
-            if len(args) == 1:
-                if not world.is_a_resource(args[0]): 
-                    print("not a resource")
-                    return
+            if len(args) != 1:
+                return
+            
+            if not world.is_a_resource(args[0]): 
+                print("not a resource")
+                return
                 
-                node = action_group(
-                    planner.plan(ActionIntent(Intention.PREPARE_FOR_GATHERING, resource=args[0])),
-                    action_group(
-                        planner.plan(ActionIntent(Intention.GATHER, resource=args[0], until=cond(ActionCondition.INVENTORY_FULL))),
-                        planner.plan(ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
-                        until=cond(ActionCondition.FOREVER)
-                    )
-                )
-            else:
-                node = action_group(
-                    action_group(
-                        planner.plan(ActionIntent(Intention.GATHER, until=cond(ActionCondition.INVENTORY_FULL))),
-                        planner.plan(ActionIntent(Intention.BANK_THEN_RETURN, preset="all")),
-                        until=cond(ActionCondition.FOREVER)
-                    )
-                )
-
+            node = planner.plan(ActionIntent(Intention.GATHER, resource=args[0], until=cond(ActionCondition.FOREVER)))
             scheduler.queue_action_node(character_name, node)
 
         case 'fight-forever':

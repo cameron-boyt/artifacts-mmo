@@ -1,4 +1,4 @@
-from src.action import Action, ActionGroup, CharacterAction, ActionConditionExpression
+from src.action import Action, ActionGroup, CharacterAction, MetaAction, ActionConditionExpression
 
 ## Grouping Factory
 def action_group(*actions: Action | ActionGroup, until: ActionConditionExpression | None = None) -> ActionGroup:
@@ -47,8 +47,8 @@ def bank_deposit_item(**params) -> Action:
 def bank_withdraw_item(**params) -> Action:
     return Action(CharacterAction.BANK_WITHDRAW_ITEM, params=params)
 
-def bank_all_items() -> Action:
-    return Action(CharacterAction.BANK_DEPOSIT_ITEM, params={"preset": "all"})
+def bank_all_items(exclude: List[str] = []) -> Action:
+    return Action(CharacterAction.BANK_DEPOSIT_ITEM, params={"preset": "all", "exclude": exclude})
                                                              
 def bank_deposit_gold(**params) -> Action:
     return Action(CharacterAction.BANK_DEPOSIT_GOLD, params=params)
@@ -71,3 +71,14 @@ def complete_task() -> Action:
 
 def task_exchange() -> Action:
     return Action(CharacterAction.TASK_EXCHANGE)
+
+## Meta Actions
+
+def reserve_item_in_bank(**params) -> Action:
+    return Action(MetaAction.CREATE_ITEM_RESERVATION, params=params)
+
+def update_item_reservation(**params) -> Action:
+    return Action(MetaAction.UPDATE_ITEM_RESERVATION, params=params)
+
+def clear_item_reservation(**params) -> Action:
+    return Action(MetaAction.CLEAR_ITEM_RESERVATION, params=params)

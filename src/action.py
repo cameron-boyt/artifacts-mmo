@@ -68,13 +68,19 @@ class LogicalOperator(Enum):
 class ControlOperator(Enum):
     IF = auto()
     REPEAT = auto()
+    DO_WHILE = auto()
 
 type ActionExecutable = Action | ActionGroup | ActionControlNode | DeferredAction
+
+class MetaAction(Enum):
+    CREATE_ITEM_RESERVATION = auto()
+    UPDATE_ITEM_RESERVATION = auto()
+    CLEAR_ITEM_RESERVATION = auto()
 
 @dataclass
 class Action:
     """A command to be executed."""
-    type: CharacterAction
+    type: CharacterAction | MetaAction
     params: Dict[str, Any] = field(default_factory=dict)
     until: ActionConditionExpression | None = None
 
@@ -90,8 +96,12 @@ class ActionControlNode:
     control_operator: ControlOperator
     branches: List[Tuple[ActionConditionExpression, ActionExecutable]] | None = None
     fail_path: ActionExecutable | None = None
+
     control_node: "ActionControlNode" | None = None
     until: ActionConditionExpression | None = None
+
+    action_node: ActionExecutable | None = None
+    condition: ActionConditionExpression | None = None
 
     def __post_init__(self):
         if self.control_operator == ControlOperator.IF:
@@ -101,6 +111,8 @@ class ActionControlNode:
             # There should be no child control_node or until condition defined
             assert(self.control_node is None)
             assert(self.until is None)
+            assert(self.action_node is None)
+            assert(self.condition is None)
         
         if self.control_operator == ControlOperator.REPEAT:
             # A control_node must be defined
@@ -112,6 +124,21 @@ class ActionControlNode:
             # There should be no decision branches or fail_path defined
             assert(self.branches is None)
             assert(self.fail_path is None)
+            assert(self.action_node is None)
+            assert(self.condition is None)
+
+        if self.control_operator == ControlOperator.DO_WHILE:
+            # An action_node must be defined
+            assert(self.action_node is not None)
+
+            # A do_while condition must be defined
+            assert(self.condition)
+
+            # There should be no decision branches or repeat untils defined
+            assert(self.branches is None)
+            assert(self.fail_path is None)
+            assert(self.control_node is None)
+            assert(self.until is None)
 
 @dataclass
 class DeferredAction:

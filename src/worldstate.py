@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Set, Tuple, Any
 from math import floor, ceil
 from itertools import product
+from src.action import *
 from src.helpers import *
 
 type LocationSet = Set[Tuple[int, int]]
@@ -502,23 +503,55 @@ class WorldState:
         for item in bank_data:
             self._bank_data[item["code"]] = item["quantity"]
         
-    def reserve_bank_items(self, character: str, items: List[Dict]) -> str:
-        id = str(uuid.uuid4())
-        self.bank_reservations.setdefault(character, {})[id] = items
-        return id
+    def reserve_bank_items(self, character: str, items: Dict[str, int]):
+        for item, qty in items.items():
+            self.bank_reservations.setdefault(character, {})[item] = qty
 
-    def clear_bank_reservation(self, character, id: str):
-        del self.bank_reservations.setdefault(character, {})[id]    
+    def update_bank_reservations(self, character: str, items: Dict[str, int]):
+        for item, qty_delta in items.items():
+            self.bank_reservations[character][item] += qty_delta
+
+            if self.bank_reservations[character][item] == 0:
+                del self.bank_reservations[character][item]
+
+    def clear_bank_reservation(self, character, item: str):
+        del self.bank_reservations[character][item]
         
     def get_amount_of_item_reserved_in_bank(self, item: str) -> int:
         amount_reserved = 0
-        for character in self.bank_reservations.keys():
-            for id, reservation in self.bank_reservations[character].items():
-                for r in reservation:
-                    amount_reserved += r["quantity"] if r["code"] == item else 0
+        for character, reservations in self.bank_reservations.items():
+            for r_item, r_qty in reservations.items():
+                amount_reserved += r_qty if r_item == item else 0
 
         return amount_reserved
     
     # Other Checkers
     def get_task_master_locations(self) -> List[Tuple[int, int]]:
         return self._interactions.tasks_masters
+
+   ## Action Performance
+    async def perform(self, action: Action) -> ActionOutcome:
+        match action.type:
+            case MetaAction.CREATE_ITEM_RESERVATION:
+                name = action.params.get("name")
+                item = action.params.get("item")
+                quantity = action.params.get("quantity")
+                self.reserve_bank_items(name, { item: quantity })
+                return ActionOutcome.SUCCESS
+
+            case MetaAction.UPDATE_ITEM_RESERVATION:
+                name = action.params.get("name")
+                item = action.params.get("item")
+                quantity = action.params.get("quantity")
+                self.update_bank_reservations(name, { item: quantity })
+                return ActionOutcome.SUCCESS
+
+            case MetaAction.CLEAR_ITEM_RESERVATION:
+                name = action.params.get("name")
+                item = action.params.get("item")
+                self.clear_bank_reservation(name, item)
+                return ActionOutcome.SUCCESS
+
+                
+            case _:
+                raise Exception(f"[{self.name}] Unknown action type: {action.type}")
