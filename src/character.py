@@ -156,7 +156,7 @@ class CharacterAgent:
             (item, self.world_state.get_heal_power_of_food(item["code"]))
             for item in self.char_data["inventory"]
             if self.world_state.is_food(item["code"]) 
-            and self.world_state.character_meets_conditions(
+            and self.world_state.character_meets_conditions_for_item(
                 self.char_data, 
                 self.world_state.get_item_info(item["code"])["conditions"]
             )
@@ -184,6 +184,12 @@ class CharacterAgent:
                 return item_data["quantity"]
 
         return 0
+    
+    def get_task_target(self) -> str:
+        return self.char_data["task"]
+    
+    def get_task_quantity_remaining(self) -> int:
+        return self.char_data["task_total"] - self.char_data["task_progress"]
     
     def set_abort_actions(self):
         self.abort_actions = True
@@ -229,7 +235,7 @@ class CharacterAgent:
         usable_food = [
             item for item in self.char_data["inventory"]
             if self.world_state.is_food(item["code"]) 
-            and self.world_state.character_meets_conditions(
+            and self.world_state.character_meets_conditions_for_item(
                 self.char_data, 
                 self.world_state.get_item_info(item["code"])["conditions"]
             )
@@ -247,7 +253,7 @@ class CharacterAgent:
     
     def has_task_of_type(self, task_type: str) -> bool:
         if task_type == "gathering":
-            return self.world_state.is_a_resource(self.char_data["task"])
+            return not self.world_state.item_is_craftable(self.char_data["task"])
         elif task_type == "crafting":
             return self.world_state.item_is_craftable(self.char_data["task"])
         else:
@@ -383,12 +389,12 @@ class CharacterAgent:
                     return ActionOutcome.CANCEL
 
                 # Reserve the chosen items
-                reservation_id = self.world_state.reserve_bank_items(items_to_withdraw)
+                reservation_id = self.world_state.reserve_bank_items(self.name, items_to_withdraw)
                 
                 api_result = await self.api_client.bank_withdraw_item(self.name, items_to_withdraw)
 
                 # Clear the item reservation now we've attempted the transaction
-                self.world_state.clear_bank_reservation(reservation_id)
+                self.world_state.clear_bank_reservation(self.name, reservation_id)
             
             case CharacterAction.BANK_DEPOSIT_GOLD:
                 quantity_to_deposit = action.params.get("quantity", 0)

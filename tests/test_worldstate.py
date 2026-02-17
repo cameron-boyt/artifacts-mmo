@@ -182,45 +182,6 @@ def test__is_tool(world_state: WorldState, item, expected):
     result = world_state.is_tool(item)
     assert result == expected
     
-#get_best_tool_for_skill_in_bank
-@pytest.mark.parametrize(
-    "bank,char,skill,expected",
-    [
-        pytest.param([], {}, "mining", None, id="bank_empty"),
-        pytest.param({ "copper_pickaxe": 1 }, { "mining_level": 1 }, "mining", "copper_pickaxe", id="bank_has_tool"),
-        pytest.param({ "copper_pickaxe": 1, "iron_pickaxe": 1 }, { "mining_level": 1 }, "mining", "copper_pickaxe", id="bank_has_multiple_tools__insufficient_level"),
-        pytest.param({ "copper_pickaxe": 1, "iron_pickaxe": 1 }, { "mining_level": 10 }, "mining", "iron_pickaxe", id="bank_has_multiple_tools__sufficient_level"),
-        pytest.param({ "copper_pickaxe": 1, "copper_axe": 1 }, { "mining_level": 1, "woodcutting_level": 1 }, "mining", "copper_pickaxe", id="bank_has_multiple_tools__multiple_skills__mining"),
-        pytest.param({ "copper_pickaxe": 1, "copper_axe": 1 }, { "mining_level": 1, "woodcutting_level": 1 }, "woodcutting", "copper_axe", id="bank_has_multiple_tools__multiple_skills__woodcutting"),
-    ]
-)
-
-def test__get_best_tool_for_skill_in_bank(world_state: WorldState, bank, char, skill, expected):
-    world_state._bank_data = bank
-    result = world_state.get_best_tool_for_skill_in_bank(char, skill)
-    if expected is None:
-        assert result is None
-    else:
-        assert result[0] == expected
-
-#get_gather_power_of_tool
-@pytest.mark.parametrize(
-    "tool,skill,expected,exception",
-    [
-        pytest.param("copper_pickaxe", "mining", 10, None, id="tool_matching_skill"),
-        pytest.param("copper_pickaxe", "woodcutting", 0, None, id="tool_not_matching_skill"),
-        pytest.param("copper_ore", "mining", None, KeyError, id="not_tool"),
-    ]
-)
-
-def test__get_gather_power_of_tool(world_state: WorldState, tool, skill, expected, exception):
-    if exception:
-        with pytest.raises(exception):
-            world_state.get_gather_power_of_tool(tool, skill)
-    else:
-        result = world_state.get_gather_power_of_tool(tool, skill)
-        assert result == expected
-    
 #is_weapon
 @pytest.mark.parametrize(
     "item,expected",
@@ -236,47 +197,6 @@ def test__is_weapon(world_state: WorldState, item, expected):
     result = world_state.is_weapon(item)
     assert result == expected
 
-#get_best_weapon_for_monster_in_bank
-@pytest.mark.parametrize(
-    "bank,char,monster,expected",
-    [
-        pytest.param({}, { "level": 5 }, "chicken", None, id="bank_empty"),
-        pytest.param({ "copper_pickaxe": 1 }, { "level": 5 }, "chicken", "copper_pickaxe", id="bank_has_weapon"),
-        pytest.param({ "copper_pickaxe": 1, "mushstaff": 1 }, { "level": 50 }, "chicken", "mushstaff", id="bank_has_multiple_weapons"),
-        pytest.param({ "copper_pickaxe": 1, "mushstaff": 1 }, { "level": 1 }, "chicken", "copper_pickaxe", id="bank_has_multiple_weapons__insufficient_level"),
-        pytest.param({ "fire_staff": 1, "water_bow": 1 }, { "level": 5 }, "cow", "water_bow", id="bank_has_multiple_tools__water_resistence__resisted_has_high_crit_chance"),
-        pytest.param({ "fire_staff": 1, "sticky_sword": 1 }, { "level": 5 }, "wolf", "fire_staff", id="bank_has_multiple_tools__fire_weakness"),
-        pytest.param({ "fire_staff": 1, "water_bow": 1 }, { "level": 5 }, "wolf", "water_bow", id="bank_has_multiple_tools__fire_weakness__other_weapon_high_crit_chance"),
-    ]
-)
-
-def test__get_best_weapon_for_monster_in_bank(world_state: WorldState, bank, char, monster, expected):
-    world_state._bank_data = bank
-    result = world_state.get_best_weapon_for_monster_in_bank(char, monster)
-    if expected is None:
-        assert result is None
-    else:
-        assert result[0] == expected
-
-#get_attack_power_of_weapon
-@pytest.mark.parametrize(
-    "weapon,monster,expected,exception",
-    [
-        pytest.param("copper_pickaxe", "chicken", 5, None, id="weapon_against_normal_enemy"),
-        pytest.param("copper_pickaxe", "cow", 7, None, id="weapon_against_weak_enemy"),
-        pytest.param("copper_pickaxe", "yellow_slime", 4, None, id="weapon_against_resist_enemy"),
-        pytest.param("copper_ore", "yellow_slime", None, KeyError, id="not_a_weapon"),
-    ]
-)
-
-def test__get_attack_power_of_weapon(world_state: WorldState, weapon, monster, expected, exception):
-    if exception:
-        with pytest.raises(exception):
-            world_state.get_attack_power_of_weapon(weapon, monster)
-    else:
-        result = world_state.get_attack_power_of_weapon(weapon, monster)
-        assert result == expected
-
 #is_armour
 @pytest.mark.parametrize(
     "item,expected",
@@ -291,42 +211,6 @@ def test__get_attack_power_of_weapon(world_state: WorldState, weapon, monster, e
 def test__is_armour(world_state: WorldState, item, expected):
     result = world_state.is_armour(item)
     assert result == expected
-
-#get_best_armour_for_monster_in_bank
-@pytest.mark.parametrize(
-    "bank,monster,expected",
-    [
-        pytest.param({}, "chicken", None, id="bank_empty"),
-        pytest.param({ "copper_pickaxe": 1 }, "chicken", "copper_pickaxe", id="bank_has_weapon"),
-        pytest.param({ "copper_pickaxe": 1, "mushstaff": 1 }, "chicken", "mushstaff", id="bank_has_multiple_weapons"),
-        pytest.param({ "fire_staff": 1, "water_bow": 1 }, "cow", "water_bow", id="bank_has_multiple_tools__water_resistence__resisted_has_high_crit_chance"),
-        pytest.param({ "fire_staff": 1, "sticky_sword": 1 }, "wolf", "fire_staff", id="bank_has_multiple_tools__fire_weakness"),
-        pytest.param({ "fire_staff": 1, "water_bow": 1 }, "wolf", "water_bow", id="bank_has_multiple_tools__fire_weakness__other_weapon_high_crit_chance"),
-    ]
-)
-
-def test__get_best_armour_for_monster_in_bank(world_state: WorldState, bank, monster, expected):
-    world_state._bank_data = bank
-    result = world_state.get_best_armour_for_monster_in_bank(monster)
-    assert result[0] == expected
-
-#get_defence_power_of_armour
-@pytest.mark.parametrize(
-    "armour,monster,expected,exception",
-    [
-        pytest.param("copper_helmet", "chicken", 20, None, id="armour_with_hp"),
-        pytest.param("wooden_shield", "king_slime", 7, None, id="armour_with_resistences"),
-        pytest.param("copper_ore", "yellow_slime", None, KeyError, id="not_armour"),
-    ]
-)
-
-def test__get_defence_power_of_armour(world_state: WorldState, armour, monster, expected, exception):
-    if exception:
-        with pytest.raises(exception):
-            world_state.get_defence_power_of_armour(armour, monster)
-    else:
-        result = world_state.get_defence_power_of_armour(armour, monster)
-        assert result == expected
 
 #is_food
 @pytest.mark.parametrize(
@@ -564,11 +448,11 @@ def test__get_task_master_locations(world_state: WorldState):
 
 # test
 def test__get_best_loadout_for_fighting(world_state: WorldState):
-    result = world_state.get_best_loadout_for_task({ "hp": 1, "max_hp": 100, "level": 5, "initiative": 100}, "fighting", "blue_slime")
-    assert False
+    result = world_state.get_best_loadout_for_task({ "hp": 1, "max_hp": 100, "level": 5, "initiative": 100, "inventory": []}, "fighting", "blue_slime")
+    assert result
 
 
 def test__get_best_loadout_for_gathering(world_state: WorldState):
-    result = world_state.get_best_loadout_for_task({ "hp": 1, "max_hp": 100, "level": 5, "initiative": 100}, "gathering", "iron_ore")
-    assert False
+    result = world_state.get_best_loadout_for_task({ "hp": 1, "max_hp": 100, "level": 5, "initiative": 100, "inventory": []}, "gathering", "iron_ore")
+    assert result
     

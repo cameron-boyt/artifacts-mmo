@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Callable
+
+if TYPE_CHECKING:
+    from character import CharacterAgent
 
 class CharacterAction(Enum):
     MOVE = "Move"
@@ -40,6 +43,10 @@ class ActionCondition(Enum):
     INVENTORY_CONTAINS_USABLE_FOOD = auto()
     HEALTH_LOW_ENOUGH_TO_EAT = auto()
     ITEMS_IN_EQUIP_QUEUE = auto()
+
+    RESOURCE_FROM_GATHERING = auto()
+    RESOURCE_FROM_FIGHTING = auto()
+
     HAS_TASK = auto()
     HAS_TASK_OF_TYPE = auto()
     TASK_COMPLETE = auto()
@@ -62,6 +69,8 @@ class ControlOperator(Enum):
     IF = auto()
     REPEAT = auto()
 
+type ActionExecutable = Action | ActionGroup | ActionControlNode | DeferredAction
+
 @dataclass
 class Action:
     """A command to be executed."""
@@ -72,15 +81,15 @@ class Action:
 @dataclass
 class ActionGroup:
     """A group or sequence of actions to be completed."""
-    actions: List["Action | ActionGroup | ActionControlNode"] = field(default_factory=list)
+    actions: List[ActionExecutable] = field(default_factory=list)
     until: ActionConditionExpression | None = None
 
 @dataclass
 class ActionControlNode:
-    """A sequencing control node determinine action flow such as conditions or reptition."""
+    """A sequencing control node determinine action flow such as conditions or repetition."""
     control_operator: ControlOperator
-    branches: List[Tuple[ActionConditionExpression, ActionGroup]] | None = None
-    fail_path: "Action | ActionGroup | ActionControlNode" | None = None
+    branches: List[Tuple[ActionConditionExpression, ActionExecutable]] | None = None
+    fail_path: ActionExecutable | None = None
     control_node: "ActionControlNode" | None = None
     until: ActionConditionExpression | None = None
 
@@ -103,6 +112,10 @@ class ActionControlNode:
             # There should be no decision branches or fail_path defined
             assert(self.branches is None)
             assert(self.fail_path is None)
+
+@dataclass
+class DeferredAction:
+    resolver: Callable[["CharacterAgent"], ActionExecutable]
 
 @dataclass(frozen=True)
 class ActionConditionExpression:

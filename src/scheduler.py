@@ -7,7 +7,7 @@ import logging
 from collections import deque
 from typing import TYPE_CHECKING, Any, Dict
 
-from src.action import Action, ActionGroup, ActionCondition, ActionConditionExpression, ActionOutcome, LogicalOperator, ControlOperator, ActionControlNode
+from src.action import *
 from src.character import CharacterAgent
 from src.api import APIClient
 from src.worldstate import WorldState
@@ -51,7 +51,7 @@ class ActionScheduler:
             self.logger.error(f"Task raised exception: {e}", exc_info=True)
 
 
-    def queue_action_node(self, character_name: str, node: Action | ActionGroup | ActionControlNode):
+    def queue_action_node(self, character_name: str, node: ActionExecutable):
         """Queue an `node` for evaluation and execution by the character's worker."""
         # Check the character exists (i.e. has a defined queue)
         if character_name in self.queues:
@@ -92,7 +92,7 @@ class ActionScheduler:
             else:
                 self.logger.info(f"[{character_name}] Finished queued node.")
 
-    async def _process_node(self, agent: CharacterAgent, node: Action | ActionGroup | ActionControlNode) -> bool:
+    async def _process_node(self, agent: CharacterAgent, node: ActionExecutable) -> bool:
         # Check for abort
         if agent.abort_actions:
             return False
@@ -103,6 +103,9 @@ class ActionScheduler:
             success = await self._process_action_group(agent, node)
         elif isinstance(node, ActionControlNode):
             success = await self._process_control_node(agent, node)
+        elif isinstance(node, DeferredAction):
+            deferred_node = node.resolver(agent)
+            success = await self._process_node(agent, deferred_node)
         else:
             raise Exception("Unrecognised node typing.")
 
@@ -292,6 +295,14 @@ class ActionScheduler:
                     skill = expression.parameters["skill"]
                     level = expression.parameters["level"]
                     condition_met = agent.has_skill_level(skill, level)
+
+                case ActionCondition.RESOURCE_FROM_GATHERING:
+                    resource = expression.parameters["resource"]
+                    condition_met = agent.world_state.item_from_gathering(resource)
+
+                case ActionCondition.RESOURCE_FROM_FIGHTING:
+                    resource = expression.parameters["resource"]
+                    condition_met = agent.world_state.item_from_fighting(resource)
 
                 case _:
                     raise NotImplementedError()

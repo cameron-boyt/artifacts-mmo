@@ -53,6 +53,38 @@ class ItemQuantity:
         
 ARMOUR_SLOTS = ["shield", "helmet", "body_armor", "leg_armor", "boots", "ring", "amulet"]
 SKILLS = ["mining", "woodcutting", "fishing", "weaponcrafting", "gearcrafting", "jewelrycrafting", "cooking", "alchemy"]
+WEAPON_EFFECT_CODES = [
+    "alchemy",
+    "attack_air",
+    "attack_earth",
+    "attack_fire",
+    "attack_water",
+    "critical_strike",
+    "fishing",
+    "inventory_space",
+    "mining",
+    "woodcutting",
+]
+ARMOUR_EFFECT_CODES = [
+    "critical_strike",
+    "dmg",
+    "dmg_air",
+    "dmg_earth",
+    "dmg_fire",
+    "dmg_water",
+    "haste",
+    "hp",
+    "initiative",
+    "inventory_space",
+    "prospecting",
+    "res_air",
+    "res_earth",
+    "res_fire",
+    "res_water",
+    "threat",
+    "wisdom",
+]
+ALL_EFFECT_CODES = [*WEAPON_EFFECT_CODES, *ARMOUR_EFFECT_CODES]
 
 class ItemSlot(Enum):
     WEAPON = "weapon"

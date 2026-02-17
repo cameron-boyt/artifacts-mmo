@@ -9,6 +9,7 @@ from itertools import product
 from src.helpers import *
 
 type LocationSet = Set[Tuple[int, int]]
+type DataMapping = Dict[str, Set[str]]
 
 @dataclass
 class WorldInteractions:
@@ -35,18 +36,20 @@ class WorldState:
         self._resource_to_tile = {}
         self._tile_to_resource = {}
         self._drop_sources = {}
+        self._item_stat_vectors = {}
 
         self.bank_reservations = {}
 
         self.__post_init__()
 
     def __post_init__(self):
-        self._interactions = self._generate_interations()
+        self._interactions = self._generate_interactions()
         self._resource_to_tile, self._tile_to_resource = self._generate_resource_sources()
         self._drop_sources = self._generate_monster_drop_sources()
+        self._item_stat_vectors = self._generate_item_stat_vectors()
 
     ## Post-Init Generation
-    def _generate_interations(self):
+    def _generate_interactions(self) -> WorldInteractions:
         interactions = {}
 
         for map_tile in self._map_data:
@@ -66,9 +69,9 @@ class WorldState:
             interactions.get("grand_exchange", {}),
             interactions.get("tasks_master", {}),
             interactions.get("npc", {})
-        ) 
-    
-    def _generate_resource_sources(self):
+        )
+
+    def _generate_resource_sources(self) -> Tuple[DataMapping, DataMapping]:
         resource_to_tile = {}
         tile_to_resource = {}
         for resource in self._resource_data:
@@ -78,13 +81,39 @@ class WorldState:
 
         return resource_to_tile, tile_to_resource
     
-    def _generate_monster_drop_sources(self):
+    def _generate_monster_drop_sources(self) -> DataMapping:
         monster_sources = {}
         for monster, data in self._monster_data.items():
             for drop in data["drops"]:
                 monster_sources.setdefault(drop["code"], set()).add(monster)
 
         return monster_sources 
+    
+    def _generate_item_stat_vectors(self) -> DataMapping:
+        item_stat_vectors = {}
+        
+        for item, data in self._item_data.items():
+            check_item = False
+
+            if self.is_weapon(item):
+                check_item = True
+                relevant_stats = WEAPON_EFFECT_CODES
+            elif self.is_armour(item):
+                check_item = True
+                relevant_stats = ARMOUR_EFFECT_CODES
+
+            if check_item:
+                stats = { "code": item }
+                for stat in relevant_stats:
+                    matching_stats = [effect for effect in data["effects"] if effect["code"] == stat]
+                    if len(matching_stats) == 1:
+                        stats[stat] = matching_stats[0]["value"]
+                    else:
+                        stats[stat] = 0
+
+                item_stat_vectors[item] = stats
+
+        return item_stat_vectors
     
     # Item Checkers
     def is_an_item(self, item: str) -> bool:
@@ -101,6 +130,12 @@ class WorldState:
             raise KeyError(f"{item} is not an item.")
         
         return self._item_data[item].get("craft") is not None
+    
+    def item_from_gathering(self, item: str) -> bool:
+        return item in self._resource_to_tile
+    
+    def item_from_fighting(self, item: str) -> bool:
+        return item in self._drop_sources
     
     def get_crafting_materials_for_item(self, item: str, qty=1) -> List[Tuple[str, int]] | None:
         if not self.item_is_craftable(item):
@@ -125,11 +160,11 @@ class WorldState:
         for condition in conditions:
             match condition["code"]:
                 case "level" | "mining_level" | "woodcutting_level" | "fishing_level" | "weaponcrafting_level" | \
-                     "gearcrafting_ level" | "jewelrycrafting_level" | "cooking_level" | "alchemy_level":
+                     "gearcrafting_level" | "jewelrycrafting_level" | "cooking_level" | "alchemy_level":
                     compare_value = character[condition["code"]]
                     
                 case _:
-                    raise Exception("idk what this is")
+                    raise Exception(f"Unknown condition code: {condition['code']}.")
             
             match condition["operator"]:
                 case "gt":
@@ -140,6 +175,9 @@ class WorldState:
 
                 case "lt":
                     condition_met = compare_value < condition["value"]
+                    
+                case _:
+                    raise Exception(f"Unknown condition operator: {condition['operator']}.")
                 
             if not condition_met:
                 return False
@@ -158,33 +196,6 @@ class WorldState:
     
     def is_tool(self, item: str) -> bool:
         return self.is_an_item(item) and self._item_data[item]["subtype"] == "tool"
-    
-    def get_best_tool_for_skill_in_bank(self, character: dict, skill: str) -> Tuple[str, int] | None:
-        tools = [
-            item for item in self._bank_data 
-            if self.is_tool(item)
-            and any(effect["code"] == skill for effect in self._item_data[item]["effects"])
-            and self.character_meets_conditions_for_item(character, self._item_data[item]["conditions"])
-        ]
-
-        if len(tools) > 0:
-            tool_power = [(tool, self.get_gather_power_of_tool(tool, skill)) for tool in tools]
-            best_tool = max(tool_power, key=lambda t: t[1])
-            return best_tool
-        else:
-            return None
-        
-    def get_gather_power_of_tool(self, tool: str, skill: str) -> int:
-        if not self.is_equipment(tool):
-            raise KeyError(f"{tool} is not equipment.")
-
-        power = [effect["value"] for effect in self._item_data[tool]["effects"] if effect["code"] == skill]
-        if len(power) > 0:
-            # Invert the value because tool power is stored in terms of "cooldown reduction" as as negative int.
-            # -10 is worse than -20, so we need to turn the power postitive
-            return power[0] * -1
-        else:
-            return 0
         
     def is_weapon(self, item: str) -> bool:
         return self.is_an_item(item) and self._item_data[item]["type"] == "weapon"
@@ -202,16 +213,15 @@ class WorldState:
             ]
             evaluation_function = self._evaluate_loadout_for_fighting
         elif task == "gathering":
-            relevant_weapon_stats = ["mining", "woodcutting", "fishing", "alchemy"]
+            skill = self.get_gather_skill_for_resource(target)
+            relevant_weapon_stats = [skill]
             relevant_armour_stats = ["wisdom", "prospecting"]
             evaluation_function = self._evaluate_loadout_for_gathering
         else:
             raise Exception(f"Unknown loadout task type: {task}.")
-        
-        all_relevant_stats = [*relevant_weapon_stats, *relevant_armour_stats]
 
         loadouts = self._generate_equipment_loadouts(character, relevant_weapon_stats, relevant_armour_stats)
-        dummy_char = self._generate_dummy_char(character, all_relevant_stats)
+        dummy_char = self._generate_dummy_char(character)
 
         # For each loadout, apply the stats and then simulate a fight.
         loadout_ratings = {}
@@ -229,12 +239,12 @@ class WorldState:
         gear_list = [item["code"] for item in best_loadout if item is not None]
         return gear_list
         
-    def _generate_dummy_char(self, character: dict, stats_to_rewind: list[str]) -> dict:
+    def _generate_dummy_char(self, character: dict) -> dict:
         """Create a dummy character from the provided character stats as if it had nothing equipped."""
         dummy_char = dict(character)
 
-        # Reset stats
-        for stat in stats_to_rewind:
+        # Reset stats, there is no other source to these stats other than this equipment, so this assumption is safe
+        for stat in ALL_EFFECT_CODES:
             dummy_char[stat] = 0
 
         # Rewind hp
@@ -266,7 +276,7 @@ class WorldState:
         geared_char["hp"] = geared_char["max_hp"]
         return geared_char
     
-    def _generate_equipment_loadouts(self, character: dict, relevant_weapon_stats: list[str], relevant_armour_stats: list[str]) -> dict:
+    def _generate_equipment_loadouts(self, character: Dict, relevant_weapon_stats: List[str], relevant_armour_stats: List[str]) -> List[Dict]:
         equipment = {
             "weapon": [],
             "helmet": [],
@@ -284,8 +294,9 @@ class WorldState:
             if item["code"] != "":
                 items_to_check.add(item["code"])
 
+        # Review available items in bank
         for item in self._bank_data:
-                items_to_check.add(item)
+            items_to_check.add(item)
 
         # Determine which items can be equipped and have relevant stats for consideration
         for item in items_to_check:
@@ -295,31 +306,14 @@ class WorldState:
                 continue
 
             if self.is_weapon(item):
-                weapon_stats = { "code": item }
-                has_relevant_stats = False
-
-                for stat in relevant_weapon_stats:
-                    matching_stats = [effect for effect in item_data["effects"] if effect["code"] == stat]
-                    if len(matching_stats) == 1:
-                        has_relevant_stats = True
-                        weapon_stats[stat] = matching_stats[0]["value"]
-                    else:
-                        weapon_stats[stat] = 0
-
+                weapon_stats = self._item_stat_vectors[item]
+                has_relevant_stats = any(weapon_stats[stat] != 0 for stat in relevant_weapon_stats)
                 if has_relevant_stats:
-                    equipment["weapon"].append(weapon_stats)
+                    equipment["weapon"].append(self._item_stat_vectors[item])
 
             if self.is_armour(item):
-                armour_stats = { "code": item }
-                has_relevant_stats = False
-
-                for stat in relevant_armour_stats:
-                    matching_stats = [effect for effect in item_data["effects"] if effect["code"] == stat]
-                    if len(matching_stats) == 1:
-                        has_relevant_stats = True
-                        armour_stats[stat] = matching_stats[0]["value"]
-                    else:
-                        armour_stats[stat] = 0
+                armour_stats = self._item_stat_vectors[item]
+                has_relevant_stats = any(armour_stats[stat] != 0 for stat in relevant_armour_stats)
 
                 if has_relevant_stats:
                     equip_slot = self.get_equip_slot_for_item(item)
@@ -329,12 +323,13 @@ class WorldState:
         # for slot, items in equipment.items():
         #     print(slot, item)
 
-        # Create all equipment combinations
+        # Prepare equipment lists for cartesean product generation
         slot_item_lists = [(items if items else [None]) for items in equipment.values()]
 
         # Add another set of rings since we can equip two of them!
-        slot_item_lists.extend([equipment["ring"] if equipment["ring"] else [None]])
+        slot_item_lists.append([*equipment["ring"], None] if equipment["ring"] else [None])
 
+        # Create all equipment combinations
         loadouts = list(product(*slot_item_lists))
 
         # Check we have enough equipment quantity for both rings (lists 7 and 8)
@@ -343,19 +338,27 @@ class WorldState:
         for loadout in loadouts:
             if (
                 loadout[7] and loadout[8] and
-                loadout[7]["code"] == loadout[8]["code"] and 
-                self.get_amount_of_item_in_bank(loadout[7]["code"]) < 2
+                loadout[7]["code"] == loadout[8]["code"]
             ):
-                continue
+                item = loadout[7]["code"]
+                bank_amt = self.get_amount_of_item_in_bank(item)
+                inv_amt = sum(i["quantity"] for i in character["inventory"] if i["code"] == item)
+                equip_amt = 1 if (character["ring1_slot"] == item or character["ring2_slot"] == item) else 0
+
+                if bank_amt + inv_amt + equip_amt < 2:
+                    continue
                 
             valid_loadouts.append(loadout)
 
         return valid_loadouts
     
-    def _evaluate_loadout_for_gathering(self, character: dict, skill: str) -> Tuple[int]:
+    def _evaluate_loadout_for_gathering(self, character: dict, resource: str) -> Tuple[int]:
+        skill = self.get_gather_skill_for_resource(resource)
+
         skill_cooldown_reduction = character[skill]
         droprate_bonus = character["prospecting"]
         xp_bonus = character["wisdom"]
+
         return -skill_cooldown_reduction, droprate_bonus, xp_bonus
     
     def is_food(self, item: str) -> bool:
@@ -450,7 +453,7 @@ class WorldState:
         monster_data = self.get_monster_info(monster)
 
         damage_dealt, damage_taken = self.calculate_damage_against_character_and_monster(character, monster_data)
-        turns_to_kill = monster_data["hp"] // damage_dealt
+        turns_to_kill = ceil(monster_data["hp"] / damage_dealt)
 
         # If the monster goes first, the character gets hits one additional time
         monster_first = character.get("initiative", 0) < monster_data.get("initiative", 0) 
@@ -463,19 +466,22 @@ class WorldState:
         return fight_win, -turns_to_kill, -char_damage_taken
 
     def calculate_damage_against_character_and_monster(self, character: dict, monster: dict) -> Tuple[int, int]:
+        # critical_strike is an int between 0-100.
+        crit_dmg_mult = 1.5
+
         character_damage = round((
             round((character["attack_air"] * (1 + character["dmg_air"] / 100)) / (1 + monster["res_air"] / 100)) + 
-            round((character["attack_water"] * (1 + character["dmg_air"] / 100)) / (1 + monster["res_water"] / 100)) + 
-            round((character["attack_earth"] * (1 + character["dmg_water"] / 100)) / (1 + monster["res_earth"] / 100)) + 
+            round((character["attack_water"] * (1 + character["dmg_water"] / 100)) / (1 + monster["res_water"] / 100)) + 
+            round((character["attack_earth"] * (1 + character["dmg_earth"] / 100)) / (1 + monster["res_earth"] / 100)) + 
             round((character["attack_fire"] * (1 + character["dmg_fire"] / 100)) / (1 + monster["res_fire"] / 100))
-        ) * (1 + character["dmg"] / 100) * 1.5 * (1 + character["critical_strike"] / 100))
+        ) * (1 + character["dmg"] / 100) * (1 + ((character["critical_strike"] / 100) * (crit_dmg_mult - 1))))
 
         monster_damage = round((
             round(monster["attack_air"] / (1 + character["res_air"] / 100)) + 
             round(monster["attack_water"] / (1 + character["res_water"] / 100)) + 
             round(monster["attack_earth"] / (1 + character["res_earth"] / 100)) + 
             round(monster["attack_fire"]  / (1 + character["res_fire"] / 100))
-        ) * 1.5 * (1 + monster["critical_strike"] / 100))
+        ) * (1 + ((monster["critical_strike"] / 100) * (crit_dmg_mult - 1))))
 
         return character_damage, monster_damage
     
@@ -496,19 +502,20 @@ class WorldState:
         for item in bank_data:
             self._bank_data[item["code"]] = item["quantity"]
         
-    def reserve_bank_items(self, items: List[Dict]) -> str:
+    def reserve_bank_items(self, character: str, items: List[Dict]) -> str:
         id = str(uuid.uuid4())
-        self.bank_reservations[id] = items
+        self.bank_reservations.setdefault(character, {})[id] = items
         return id
 
-    def clear_bank_reservation(self, id: str):
-        del self.bank_reservations[id]      
+    def clear_bank_reservation(self, character, id: str):
+        del self.bank_reservations.setdefault(character, {})[id]    
         
     def get_amount_of_item_reserved_in_bank(self, item: str) -> int:
         amount_reserved = 0
-        for id, reservation in self.bank_reservations.items():
-            for r in reservation:
-                amount_reserved += r["quantity"] if r["code"] == item else 0
+        for character in self.bank_reservations.keys():
+            for id, reservation in self.bank_reservations[character].items():
+                for r in reservation:
+                    amount_reserved += r["quantity"] if r["code"] == item else 0
 
         return amount_reserved
     

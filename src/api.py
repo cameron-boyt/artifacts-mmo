@@ -78,61 +78,59 @@ class APIClient:
         return response.json()
 
     ## API General Requests for Characters
-    async def move(self, character_name: str, x: int, y: int) -> APIResult:
-        payload = { "x": x, "y": y }
-        response = await self._client.post(f"/my/{character_name}/action/move", json=payload)
+    async def try_request(self, url: str, payload: dict = {}) -> APIResult:
+        for i in range(3):
+            try:
+                if payload:
+                    response = await self._client.post(url, json=payload)
+                else:
+                    response = await self._client.post(url)
+            except httpx.ReadTimeout:
+                self.logger.warning(f"Request timed out for '{url}', attempt {i} of 3.")
+                continue
+
+            break
+
         return await self.handle_status(response)
+
+    async def move(self, character_name: str, x: int, y: int) -> APIResult:
+        return await self.try_request(f"/my/{character_name}/action/move", { "x": x, "y": y })
     
     async def transition(self) -> APIResult:
         raise NotImplementedError()
 
     async def rest(self, character_name: str) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/rest")
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/rest")
 
     async def equip(self, character_name: str, item_code: str, item_slot: str, ) -> APIResult:
-        payload = { "code": item_code, "slot": item_slot }
-        response = await self._client.post(f"/my/{character_name}/action/equip", json=payload)
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/equip", { "code": item_code, "slot": item_slot })
 
     async def unequip(self, character_name: str, item_slot: str) -> APIResult:
-        payload = { "slot": item_slot }
-        response = await self._client.post(f"/my/{character_name}/action/unequip", json=payload)
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/unequip", { "slot": item_slot })
     
     async def use(self, character_name: str, item_code: str, quantity: int = 1) -> APIResult:
-        payload = { "code": item_code, "quantity": quantity }
-        response = await self._client.post(f"/my/{character_name}/action/use", json=payload)
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/use", { "code": item_code, "quantity": quantity })
 
     async def fight(self, character_name: str) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/fight")
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/fight")
 
     async def gather(self, character_name: str) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/gathering")
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/gathering")
 
     async def craft(self, character_name: str, item_code: str, quantity: int = 1) -> APIResult:
-        payload = { "code": item_code, "quantity": quantity }
-        response = await self._client.post(f"/my/{character_name}/action/crafting", json=payload)
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/crafting", { "code": item_code, "quantity": quantity })
 
     async def bank_deposit_gold(self, character_name: str, quantity: int) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/bank/deposit/gold", json=quantity)
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/bank/deposit/gold", quantity)
 
     async def bank_deposit_item(self, character_name: str, items: List[Dict[str, str | int]]) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/bank/deposit/item", json=items)
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/bank/deposit/item", items)
 
     async def bank_withdraw_item(self, character_name: str, items: List[Dict[str, str | int]]) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/bank/withdraw/item", json=items)
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/bank/withdraw/item", items)
 
     async def bank_withdraw_gold(self, character_name: str, quantity: int) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/bank/withdraw/gold", json=quantity)
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/bank/withdraw/gold", quantity)
     
     async def buy_bank_expansion(self) -> APIResult:
         raise NotImplementedError()
@@ -156,25 +154,19 @@ class APIClient:
         raise NotImplementedError()
     
     async def complete_task(self, character_name: str) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/task/complete")
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/task/complete")
     
     async def task_exchange(self, character_name: str) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/task/exchange")
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/task/exchange")
     
     async def accept_new_task(self, character_name: str) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/task/new")
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/task/new")
     
     async def task_trade(self, character_name: str, item_code: str, quantity: int) -> APIResult:
-        payload = { "code": item_code, "quantity": quantity }
-        response = await self._client.post(f"/my/{character_name}/action/task/trade", json=payload)
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/task/trade", { "code": item_code, "quantity": quantity })
     
     async def task_cancel(self, character_name: str) -> APIResult:
-        response = await self._client.post(f"/my/{character_name}/action/task/cancel")
-        return await self.handle_status(response)
+        return await self.try_request(f"/my/{character_name}/action/task/cancel")
     
     async def give_gold(self) -> APIResult:
         raise NotImplementedError()
