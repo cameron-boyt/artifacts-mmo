@@ -149,9 +149,9 @@ async def main():
         scheduler.add_character(character, world_state)
 
     # Run some starting commands
-    parse_input(planner, scheduler, world_state, "Cameron gather-forever copper_ore")
-    parse_input(planner, scheduler, world_state, "Maett gather-forever copper_ore")
+    parse_input(planner, scheduler, world_state, "Maett complete-tasks monsters")
     parse_input(planner, scheduler, world_state, "Oscar gather-forever copper_ore")
+    parse_input(planner, scheduler, world_state, "Cameron smart-craft copper_bar max")
     parse_input(planner, scheduler, world_state, "Jayne gather-forever copper_ore")
     parse_input(planner, scheduler, world_state, "Moira gather-forever copper_ore")
 

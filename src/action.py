@@ -69,6 +69,7 @@ class ControlOperator(Enum):
     IF = auto()
     REPEAT = auto()
     DO_WHILE = auto()
+    TRY = auto()
 
 type ActionExecutable = Action | ActionGroup | ActionControlNode | DeferredAction
 
@@ -103,6 +104,9 @@ class ActionControlNode:
     action_node: ActionExecutable | None = None
     condition: ActionConditionExpression | None = None
 
+    error_path: ActionExecutable | None = None
+    finally_path: ActionExecutable | None = None
+
     def __post_init__(self):
         if self.control_operator == ControlOperator.IF:
             # There must be at least one branch
@@ -113,6 +117,8 @@ class ActionControlNode:
             assert(self.until is None)
             assert(self.action_node is None)
             assert(self.condition is None)
+            assert(self.error_path is None)
+            assert(self.finally_path is None)
         
         if self.control_operator == ControlOperator.REPEAT:
             # A control_node must be defined
@@ -126,6 +132,8 @@ class ActionControlNode:
             assert(self.fail_path is None)
             assert(self.action_node is None)
             assert(self.condition is None)
+            assert(self.error_path is None)
+            assert(self.finally_path is None)
 
         if self.control_operator == ControlOperator.DO_WHILE:
             # An action_node must be defined
@@ -139,6 +147,17 @@ class ActionControlNode:
             assert(self.fail_path is None)
             assert(self.control_node is None)
             assert(self.until is None)
+            assert(self.error_path is None)
+            assert(self.finally_path is None)
+
+        if self.control_operator == ControlOperator.TRY:
+            # There should be no decision branches or repeat untils defined
+            assert(self.branches is None)
+            assert(self.fail_path is None)
+            assert(self.control_node is None)
+            assert(self.until is None)
+            assert(self.action_node is None)
+            assert(self.condition is None)
 
 @dataclass
 class DeferredAction:

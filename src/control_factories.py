@@ -22,3 +22,10 @@ def DO_WHILE(action_node: ActionExecutable, condition: ActionConditionExpression
         action_node=action_node,
         condition=condition
     )
+
+def TRY(node: ActionExecutable, error_path: ActionExecutable, finally_path: ActionExecutable) -> ActionControlNode:
+    return ActionControlNode(
+        control_operator = ControlOperator.TRY,
+        on_error = error_path,
+        finally_path = finally_path
+    )

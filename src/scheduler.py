@@ -239,6 +239,28 @@ class ActionScheduler:
                         return result
                 
                 return result
+            
+            case ControlOperator.TRY:
+                result = await self._process_node(agent, control_node.action_node)
+
+                # If the try group failed, execute the error path, should one exist
+                if not result and control_node.error_path:
+                    result = await self._process_node(agent, control_node.error_path)
+
+                    # If the error subpath fails, we should error out as normal
+                    if not result:
+                        return result
+
+                # If a finally path exist, always execute
+                if control_node.finally_path:
+                    result = await self._process_node(agent, control_node.finally_path)
+
+                    # If the finally subpath fails, we should error out as normal
+                    if not result:
+                        return result
+                
+                # Try paths should always return True, since we're capturing any failures
+                return True
 
     def _evaluate_control_branches(self, agent: CharacterAgent, control_node: ActionControlNode) -> Action | ActionGroup | ActionControlNode | None:
         for branch in control_node.branches:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Set, Tuple, Any
 from math import floor, ceil
@@ -291,6 +292,11 @@ class WorldState:
 
         # Take into account items already equipped
         items_to_check = set()
+        for slot_key in [key for key in character.keys() if re.search(r'_slot$', key)]:
+            if character[slot_key] != "":
+                items_to_check.add(character[slot_key])
+
+        # Also check items within the inventory
         for item in character["inventory"]:
             if item["code"] != "":
                 items_to_check.add(item["code"])
@@ -552,6 +558,5 @@ class WorldState:
                 self.clear_bank_reservation(name, item)
                 return ActionOutcome.SUCCESS
 
-                
             case _:
-                raise Exception(f"[{self.name}] Unknown action type: {action.type}")
+                raise Exception(f"[World] Unknown action type: {action.type}")

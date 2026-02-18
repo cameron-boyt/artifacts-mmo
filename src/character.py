@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
+import re
 from typing import TYPE_CHECKING, Dict, List, Tuple, Any
 from math import floor, ceil
 
@@ -357,8 +358,9 @@ class CharacterAgent:
 
                         if loadout := self.world_state.get_best_loadout_for_task(self.char_data, preset, target):
                             for item in loadout:
-                                # If the item is already equipped, skip
-                                if any([equipped == item for slot, equipped in self.char_data.items() if "slot" in slot]):
+                                # If the item is already equipped, skip.
+                                # Only actual equipment slots are called *_slot, so the broad check is ok.
+                                if any([equipped == item for slot, equipped in self.char_data.items() if re.search(r'_slot$', slot)]):
                                     continue
 
                                 items_to_withdraw.extend([{ "code": item, "quantity": 1 }])
@@ -369,13 +371,9 @@ class CharacterAgent:
                         if preset == "fighting":
                             item_order = ItemOrder(items=[ItemSelection(item_type=ItemType.FOOD, quantity=ItemQuantity(max=50))])
                             food_withdrawn = self._construct_item_list(item_order)
-                            self.context["withdrawn_food"] = food_withdrawn[0]["code"]
-                            items_to_withdraw.extend(food_withdrawn)
-                        
-                    case "on_task":
-                        task_item = self.char_data["task"]
-                        item_order = ItemOrder([ItemSelection(item=task_item, quantity=ItemQuantity(min=1))])
-                        items_to_withdraw = self._construct_item_list(item_order)
+                            if food_withdrawn:
+                                self.context["withdrawn_food"] = food_withdrawn[0]["code"]
+                                items_to_withdraw.extend(food_withdrawn)
 
                     case _:
                         # Construct a list of items that need to be withdrawn
@@ -437,7 +435,7 @@ class CharacterAgent:
                             return ActionOutcome.CANCEL
 
                     case _:
-                        raise Exception("idk what to use")
+                        raise Exception("No use type has been specified.")
                     
                 api_result = await self.api_client.use(self.name, item_to_use["code"])
 
