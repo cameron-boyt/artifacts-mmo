@@ -84,7 +84,7 @@ ARMOUR_EFFECT_CODES = [
     "threat",
     "wisdom",
 ]
-ALL_EFFECT_CODES = [*WEAPON_EFFECT_CODES, *ARMOUR_EFFECT_CODES]
+ALL_EFFECT_CODES = list(set([*WEAPON_EFFECT_CODES, *ARMOUR_EFFECT_CODES]))
 
 class ItemSlot(Enum):
     WEAPON = "weapon"

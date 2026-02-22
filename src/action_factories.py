@@ -1,11 +1,15 @@
-from src.action import Action, ActionGroup, CharacterAction, MetaAction, ActionConditionExpression
+from typing import List
+from src.action import *
 
 ## Grouping Factory
-def action_group(*actions: Action | ActionGroup, until: ActionConditionExpression | None = None) -> ActionGroup:
-    return ActionGroup(actions=actions, until=until)
+def group(*actions: ActionExecutable) -> ActionGroup:
+    return ActionGroup(actions=actions)
 
 def do_nothing() -> ActionGroup:
-    return action_group()
+    return group()
+
+def fail_action() -> Action:
+    return Action(MetaAction.FAIL_OUT)
 
 ## Base Action Factories
 
@@ -20,8 +24,8 @@ def transition(**params) -> Action:
 def rest() -> Action:
     return Action(CharacterAction.REST)
 
-def fight(*, until: ActionConditionExpression | None = None) -> Action:
-    return Action(CharacterAction.FIGHT, until=until)
+def fight() -> Action:
+    return Action(CharacterAction.FIGHT)
 
 # Equipment
 def equip(**params) -> Action:
@@ -30,12 +34,12 @@ def equip(**params) -> Action:
 def unequip(**params) -> Action:
     return Action(CharacterAction.UNEQUIP, params=params)
 
-def use(until: ActionConditionExpression | None = None, **params) -> Action:
-    return Action(CharacterAction.USE, params=params, until=until)
+def use(**params) -> Action:
+    return Action(CharacterAction.USE, params=params)
 
 # Skilling
-def gather(until: ActionConditionExpression | None = None) -> Action:
-    return Action(CharacterAction.GATHER, until=until)
+def gather() -> Action:
+    return Action(CharacterAction.GATHER)
 
 def craft(**params) -> Action:
     return Action(CharacterAction.CRAFT, params=params)
@@ -46,15 +50,17 @@ def bank_deposit_item(**params) -> Action:
 
 def bank_withdraw_item(**params) -> Action:
     return Action(CharacterAction.BANK_WITHDRAW_ITEM, params=params)
-
-def bank_all_items(exclude: List[str] = []) -> Action:
-    return Action(CharacterAction.BANK_DEPOSIT_ITEM, params={"preset": "all", "exclude": exclude})
                                                              
 def bank_deposit_gold(**params) -> Action:
     return Action(CharacterAction.BANK_DEPOSIT_GOLD, params=params)
 
 def bank_withdraw_gold(**params) -> Action:
     return Action(CharacterAction.BANK_WITHDRAW_GOLD, params=params)
+
+# Custom Banking
+
+def bank_all_items(exclude: List[str] = []) -> Action:
+    return Action(CharacterAction.BANK_DEPOSIT_ITEM, params={"deposit_all": True, "exclude": exclude})
 
 def bank_all_gold() -> Action:
     return Action(CharacterAction.BANK_DEPOSIT_GOLD, params={"preset": "all"})
@@ -74,11 +80,29 @@ def task_exchange() -> Action:
 
 ## Meta Actions
 
-def reserve_item_in_bank(**params) -> Action:
+# Item Reservation
+def add_item_reservations(**params) -> Action:
     return Action(MetaAction.CREATE_ITEM_RESERVATION, params=params)
 
-def update_item_reservation(**params) -> Action:
+def update_item_reservations(**params) -> Action:
     return Action(MetaAction.UPDATE_ITEM_RESERVATION, params=params)
 
-def clear_item_reservation(**params) -> Action:
+def clear_item_reservations(**params) -> Action:
     return Action(MetaAction.CLEAR_ITEM_RESERVATION, params=params)
+
+# Loadout Preparaton
+def prepare_best_loadout(**params) -> Action:
+    return Action(MetaAction.PREPARE_LOADOUT, params=params)
+
+def clear_prepared_loadout() -> Action:
+    return Action(MetaAction.CLEAR_PREPARED_LOADOUT)
+
+# Context Counters
+def reset_context_counter(**params) -> Action:
+    return Action(MetaAction.RESET_CONTEXT_COUNTER, params=params)
+
+def increment_context_counter(**params) -> Action:
+    return Action(MetaAction.INCREMENT_CONTEXT_COUNTER, params=params)
+
+def clear_context_counter(**params) -> Action:
+    return Action(MetaAction.CLEAR_CONTEXT_COUNTER, params=params)

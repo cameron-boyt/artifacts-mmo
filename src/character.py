@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import logging
-import time
+from datetime import datetime
 import re
 from typing import TYPE_CHECKING, Dict, List, Tuple, Any
 from math import floor, ceil
 
-from src.action import Action, ActionGroup, ActionCondition, ActionOutcome, CharacterAction
+from src.action import Action, ActionOutcome, CharacterAction
 from src.api import APIClient, RequestOutcome, RequestOutcomeDetail
 from src.worldstate import WorldState
-from src.helpers import *
+from src.helpers import SKILLS, ItemOrder, ItemType
 
 if TYPE_CHECKING:
     from src.scheduler import ActionScheduler
@@ -27,21 +27,23 @@ class CharacterAgent:
         self.context = {
             "previous_location": (self.char_data["x"],  self.char_data["y"]),
             "equip_queue": [],
-            "damage_taken_last_fight": self.char_data["max_hp"] -self.char_data["hp"],
+            "damage_taken_last_fight": self.char_data["max_hp"],
             "last_trade": {},
-            "withdrawn_food": ""
+            "last_craft": {},
+            "prepared_loadout": [],
+            "bank_deposit_exclusions": []
         }
         self.world_state = world_state
 
         self.is_autonomous: bool = False
         self.abort_actions: bool = False
-        self.cooldown_expires_at: float = 0.0
+        self.cooldown_expires_at: float = datetime.strptime(self.char_data.get("cooldown_expiration", "1970-01-01T00:00:00.000Z"), "%Y-%m-%dT%H:%M:%S.%fZ").timestamp()
 
     ## Helper Functions
-    def _get_closest_location(self, locations: List[Tuple[int, int]]) -> Tuple[int, int]:
+    def _get_closest_location(self, locations: List[Tuple[int, int]]) -> Tuple[int, int] | None:
         """Get the location which is the shortest distance from the agent."""
         if not locations:
-            return ()
+            return None
         
         shortest_distance = 9999
         best_location = (0, 0)
@@ -53,7 +55,23 @@ class CharacterAgent:
                 best_location = location
 
         return best_location
+    
+    def _get_best_food_in_inv(self) -> str | None:
+        food = [
+            (item["code"], self.world_state.get_heal_power_of_food(item["code"]))
+            for item in self.char_data["inventory"]
+            if self.world_state.is_food(item["code"]) 
+            and self.world_state.character_meets_conditions_for_item(
+                self.char_data, 
+                self.world_state.get_item_info(item["code"])["conditions"]
+            )
+        ]
 
+        if len(food) > 0:
+            best_food = max(food, key=lambda f: f[1] if f[1] <= self.char_data["max_hp"] else -1 * f[1])
+            return best_food[0]  
+    
+    # Item List Consturctor for Orders
     def _construct_item_list(self, order: ItemOrder) -> List[Dict]:
         items = []
         
@@ -153,21 +171,6 @@ class CharacterAgent:
             items = need
 
         return items
-    
-    def _get_best_food_in_inv(self) -> str | None:
-        food = [
-            (item, self.world_state.get_heal_power_of_food(item["code"]))
-            for item in self.char_data["inventory"]
-            if self.world_state.is_food(item["code"]) 
-            and self.world_state.character_meets_conditions_for_item(
-                self.char_data, 
-                self.world_state.get_item_info(item["code"])["conditions"]
-            )
-        ]
-
-        if len(food) > 0:
-            best_food = max(food, key=lambda f: f[1] if f[1] <= self.char_data["max_hp"] else -1 * f[1])
-            return best_food[0]  
 
     def get_number_of_items_in_inventory(self) -> int:
         """Get the total number of items in the agent's inventory"""
@@ -246,6 +249,18 @@ class CharacterAgent:
 
         return len(usable_food) > 0
     
+    def bank_contains_usable_food(self) -> bool:
+        usable_food = [
+            item for item, quantity in self.world_state._bank_data.items()
+            if self.world_state.is_food(item)
+            and self.world_state.character_meets_conditions_for_item(
+                self.char_data, 
+                self.world_state.get_item_info(item)["conditions"]
+            )
+        ]
+
+        return len(usable_food) > 0
+    
     def health_sufficiently_low_to_heal(self) -> bool:
         taken_sufficient_damage = self.char_data["hp"] < self.context["damage_taken_last_fight"] * 1.5
         at_max_health = self.char_data["hp"] == self.char_data["max_hp"]
@@ -271,13 +286,29 @@ class CharacterAgent:
         equip_queue = self.context.get("equip_queue", [])
         return len(equip_queue) > 0
     
-    def has_skill_level(self, skill, level) -> bool:
+    def has_skill_level(self, skill: str, level: int) -> bool:
         if skill in SKILLS:
             return self.char_data[f"{skill}_level"] >= level
         elif skill == "character":
             return self.char_data["level"] >= level
         else:
             raise Exception(f"Unknown skill: {skill}.")
+        
+    def counter_at_value(self, name: str, value: int) -> bool:
+        return self.context[name] >= value
+        
+    # Context Updater
+    def apply_context_update(self, context_update: dict):
+        for k, v in context_update.items():
+            if re.search(r'^counter_', k):
+                if v is None:
+                    del self.context[k]
+                elif v == 0:
+                    self.context[k] = 0
+                else:
+                    self.context[k] += v
+            else:
+                self.context[k] = v
 
     ## Action Performance
     async def perform(self, action: Action) -> ActionOutcome:
@@ -319,6 +350,10 @@ class CharacterAgent:
             case CharacterAction.GATHER:
                 resource = self.world_state.get_resource_at_location(self.char_data["x"], self.char_data["y"])
 
+                if not resource:
+                    self.logger.warning(f"[{self.name}] No resource at current location")
+                    return ActionOutcome.FAIL
+
                 for r in resource:
                     r_data = self.world_state.get_item_info(r)
                     
@@ -327,82 +362,64 @@ class CharacterAgent:
 
                     r_skill = r_data["skill"]
                     r_level = r_data["level"]
-                    charcter_skill_level = self.char_data[f"{r_skill}_level"]
-                    if charcter_skill_level < r_level:
-                        self.logger.warning(f"[{self.name}] Skill '{r_skill}' level (charcter_skill_level) insufficient to gather {resource} ({r_level}).")
+                    character_skill_level = self.char_data[f"{r_skill}_level"]
+
+                    if character_skill_level < r_level:
+                        self.logger.warning(f"[{self.name}] Skill '{r_skill}' level {character_skill_level} insufficient to gather {resource} ({r_level}).")
                         return ActionOutcome.FAIL
                 
                 api_result = await self.api_client.gather(self.name)
         
             ## BANKING ##
             case CharacterAction.BANK_DEPOSIT_ITEM:
-                match action.params.get("preset", "none"):
-                    case "all":
-                        exclusions = action.params.get("exclude", [])
-                        items_to_deposit = [{ "code": item["code"], "quantity": item["quantity"] } for item in self.char_data["inventory"] if item["code"] != '' and item["code"] not in exclusions]
-                        if not items_to_deposit:
-                            return ActionOutcome.CANCEL
-                    case _:
-                        items_to_deposit = []
-                        for deposit in action.params.get("items", []):
-                            items_to_deposit.append({ "code": deposit["item"], "quantity": int(deposit["quantity"]) })
+                if action.params.get("deposit_all", False):
+                    exclusions = self.context["bank_deposit_exclusions"]
+                    items_to_deposit = [{ "code": item["code"], "quantity": item["quantity"] } for item in self.char_data["inventory"] if item["code"] != '' and item["code"] not in exclusions]
+                    
+                    if not items_to_deposit:
+                        return ActionOutcome.CANCEL
+                else:
+                    items_to_deposit = []
+                    for deposit in action.params.get("items", []):
+                        items_to_deposit.append({ "code": deposit["item"], "quantity": int(deposit["quantity"]) })
 
                 api_result = await self.api_client.bank_deposit_item(self.name, items_to_deposit)
                 
             case CharacterAction.BANK_WITHDRAW_ITEM:
                 items_to_withdraw = []
 
-                match preset := action.params.get("preset", "none"):
-                    case "gathering" | "fighting":
-                        target = action.params.get("sub_preset")
-
-                        if loadout := self.world_state.get_best_loadout_for_task(self.char_data, preset, target):
-                            for item in loadout:
-                                # If the item is already equipped, skip.
-                                # Only actual equipment slots are called *_slot, so the broad check is ok.
-                                if any([equipped == item for slot, equipped in self.char_data.items() if re.search(r'_slot$', slot)]):
-                                    continue
-
-                                items_to_withdraw.extend([{ "code": item, "quantity": 1 }])
-                                item_slot = self.world_state.get_equip_slot_for_item(item)
-                                self.context["equip_queue"].append({ "code": item, "slot": item_slot })
-
-                        # For fighting presets, also withdraw some food
-                        if preset == "fighting":
-                            item_order = ItemOrder(items=[ItemSelection(item_type=ItemType.FOOD, quantity=ItemQuantity(max=50))])
-                            food_withdrawn = self._construct_item_list(item_order)
-                            if food_withdrawn:
-                                self.context["withdrawn_food"] = food_withdrawn[0]["code"]
-                                items_to_withdraw.extend(food_withdrawn)
-
-                    case _:
-                        # Construct a list of items that need to be withdrawn
-                        item_order = action.params.get("items")
-                        items_to_withdraw = self._construct_item_list(item_order)
+                if action.params.get("prepared_loadout", False):
+                    items_to_withdraw = self.context["prepared_loadout"]
+                elif items := action.params.get("items", []):
+                    items_to_withdraw = items
+                elif order := action.params.get("order", None):
+                    items_to_withdraw = self._construct_item_list(order)
 
                 # Clean up item withdrawals
                 items_to_withdraw = [item for item in items_to_withdraw if item["quantity"] > 0]
 
                 if not items_to_withdraw:
                     return ActionOutcome.CANCEL
-
-                if reserve_items := action.params.get("reserve", False):
-                    # Reserve the chosen items
-                    self.world_state.reserve_bank_items(self.name, { item["code"]: item["quantity"] for item in items_to_withdraw })
                 
                 api_result = await self.api_client.bank_withdraw_item(self.name, items_to_withdraw)
-
-                if reserve_items:
-                    # Clear the item reservations now we've attempted the transaction
-                    self.world_state.update_bank_reservations(self.name, { item["code"]: -item["quantity"] for item in items_to_withdraw })
             
             case CharacterAction.BANK_DEPOSIT_GOLD:
-                quantity_to_deposit = action.params.get("quantity", 0)
-                api_result = await self.api_client.bank_deposit_gold(self.name, quantity_to_deposit)
+                quantity = action.params.get("quantity")
+
+                if quantity == 0:
+                    self.logger.warning(f"[{self.name}] Cannot deposit zero gold")
+                    return ActionOutcome.CANCEL
+                
+                api_result = await self.api_client.bank_deposit_gold(self.name, quantity)
                 
             case CharacterAction.BANK_WITHDRAW_GOLD:
-                quantity_to_withdraw = action.params.get("quantity", 0)
-                api_result = await self.api_client.bank_withdraw_gold(self.name, quantity_to_withdraw)
+                quantity = action.params.get("quantity")
+                
+                if quantity == 0:
+                    self.logger.warning(f"[{self.name}] Cannot withdraw zero gold")
+                    return ActionOutcome.CANCEL
+                
+                api_result = await self.api_client.bank_withdraw_gold(self.name, quantity)
 
             ## EQUIPMENT ##
             case CharacterAction.EQUIP:
@@ -430,31 +447,22 @@ class CharacterAgent:
             case CharacterAction.USE:
                 match action.params.get("item_type"):
                     case "food":
-                        item_to_use = self._get_best_food_in_inv()
-                        if not item_to_use:
+                        item = self._get_best_food_in_inv()
+                        quantity = 1
+
+                        if not item:
                             return ActionOutcome.CANCEL
 
                     case _:
-                        raise Exception("No use type has been specified.")
+                        item = action.params.get("item")
+                        quantity = action.params.get("quantity", 1)
                     
-                api_result = await self.api_client.use(self.name, item_to_use["code"])
+                api_result = await self.api_client.use(self.name, item, quantity)
 
             ## CRAFTING ##
             case CharacterAction.CRAFT:
                 item = action.params.get("item")
-                quantity = action.params.get("quantity", 1)
-                as_many_as_possible = action.params.get("as_many_as_possible", False)
-
-                if as_many_as_possible:
-                    # Maximise the number of items we craft
-                    lowest_multiple = 999
-                    required_materials = self.world_state.get_crafting_materials_for_item(item)
-                    for inv_item in self.char_data["inventory"]:
-                        for req_item in required_materials:
-                            if inv_item["code"] == req_item["code"]:
-                                lowest_multiple = min(lowest_multiple, inv_item["quantity"] // req_item["quantity"])
-
-                    quantity = lowest_multiple
+                quantity = action.params.get("quantity")
                 
                 if quantity == 0:
                     self.logger.warning(f"[{self.name}] Cannot craft zero of an item.")
@@ -479,15 +487,25 @@ class CharacterAgent:
         
         if api_result.outcome == RequestOutcome.SUCCESS:
             # If a fight occurred, get some data for future context
-            if fight_result_info := api_result.response.get("data", {}).get("fight", {}).get("characters", {}):
+            if fight_result_info := api_result.response.get("data", {}).get("fight", {}).get("characters", []):
                 old_hp = self.char_data["hp"]
-                new_hp = fight_result_info[0]["final_hp"]
-                self.context["damage_taken_last_fight"] = old_hp - new_hp
-                self.char_data = api_result.response.get("data", {}).get("characters")[0]
+
+                # Each character in the fight is given a dict in he reponse list
+                for i, result_info in enumerate(fight_result_info):
+                    new_hp = result_info["final_hp"]
+                    self.context["damage_taken_last_fight"] = old_hp - new_hp
+                    self.char_data = api_result.response.get("data", {}).get("characters")[i]
+
+                    # Need to add extra handling here for when we implement multi-char fights
+                    break
 
             # Check for trade data
             if trade_data := api_result.response.get("data", {}).get("trade"):
                 self.context["last_trade"] = trade_data
+
+            # Check for craft data
+            if craft_data := api_result.response.get("data", {}).get("details", {}).get("items"):
+                self.context["last_craft"] = craft_data[0]
 
             # Update character state
             if new_char_data := api_result.response.get("data", {}).get("character"):
@@ -495,10 +513,10 @@ class CharacterAgent:
 
             # Update the agent's cooldown
             new_cooldown = api_result.response.get("data").get("cooldown").get("remaining_seconds")
-            self.cooldown_expires_at = time.time() + new_cooldown
+            self.cooldown_expires_at = datetime.now().timestamp() + new_cooldown
             
             # Update bank
-            if bank_data := api_result.response.get("data").get("bank", {}):
+            if bank_data := api_result.response.get("data").get("bank", []):
                 self.world_state.update_bank_data(bank_data)
 
             return ActionOutcome.SUCCESS

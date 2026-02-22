@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import httpx
 import json
-from typing import List, Dict
+from typing import List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -78,7 +78,7 @@ class APIClient:
         return response.json()
 
     ## API General Requests for Characters
-    async def try_request(self, url: str, payload: dict = {}) -> APIResult:
+    async def try_request(self, url: str, payload: Any | None = None) -> APIResult:
         for i in range(3):
             try:
                 if payload:
@@ -208,7 +208,7 @@ class APIClient:
                 outcome = RequestOutcome.FAIL
                 detail = RequestOutcomeDetail.MISSING_REQUIRED_ITEMS
             
-            case 478:
+            case 487:
                 # Character has no task
                 self.logger.error("Character has no task.")
                 outcome = RequestOutcome.FAIL
