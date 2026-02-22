@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Dict, List, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Tuple, Callable
+
+if TYPE_CHECKING:
+    from src.character import CharacterAgent
 
 class CharacterAction(Enum):
     MOVE = "Move"
@@ -22,8 +25,16 @@ class CharacterAction(Enum):
     UNEQUIP = "Unequip"
     USE = "Use"
 
+    GET_TASK = "Get Task"
+    COMPLETE_TASK = "Complete Task"
+    CANCEL_TASK = "Cancel Task"
+    TASK_EXCHANGE = "Task Exchange"
+    TASK_TRADE = "Task Trade"
+
 class ActionCondition(Enum):
     NONE = auto()
+    FOREVER = auto()
+    
     INVENTORY_FULL = auto()
     INVENTORY_EMPTY = auto()
     INVENTORY_HAS_AVAILABLE_SPACE = auto()
@@ -31,7 +42,22 @@ class ActionCondition(Enum):
     BANK_HAS_ITEM_OF_QUANTITY = auto()
     INVENTORY_HAS_ITEM_OF_QUANTITY = auto()
     BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY = auto()
-    FOREVER = auto()
+
+    INVENTORY_CONTAINS_USABLE_FOOD = auto()
+    BANK_CONTAINS_USABLE_FOOD = auto()
+    HEALTH_LOW_ENOUGH_TO_EAT = auto()
+
+    ITEMS_IN_EQUIP_QUEUE = auto()
+
+    RESOURCE_FROM_GATHERING = auto()
+    RESOURCE_FROM_FIGHTING = auto()
+
+    HAS_TASK = auto()
+    HAS_TASK_OF_TYPE = auto()
+    TASK_COMPLETE = auto()
+    HAS_SKILL_LEVEL = auto()
+
+    CONTEXT_COUNTER_AT_VALUE = auto()
 
 class ActionOutcome(Enum):
     SUCCESS = auto()
@@ -47,52 +73,88 @@ class LogicalOperator(Enum):
 
 class ControlOperator(Enum):
     IF = auto()
-    REPEAT = auto()
+    WHILE = auto()
+    DO_WHILE = auto()
+    TRY = auto()
+
+type ActionExecutable = Action | ActionGroup | ActionControlNode | DeferredAction
+
+class MetaAction(Enum):
+    CREATE_ITEM_RESERVATION = auto()
+    UPDATE_ITEM_RESERVATION = auto()
+    CLEAR_ITEM_RESERVATION = auto()
+
+    PREPARE_LOADOUT = auto()
+    CLEAR_PREPARED_LOADOUT = auto()
+
+    RESET_CONTEXT_COUNTER = auto()
+    INCREMENT_CONTEXT_COUNTER = auto()
+    CLEAR_CONTEXT_COUNTER = auto()
+
+    FAIL_OUT = auto()
 
 @dataclass
 class Action:
     """A command to be executed."""
-    type: CharacterAction
+    type: CharacterAction | MetaAction
     params: Dict[str, Any] = field(default_factory=dict)
-    until: ActionConditionExpression | None = None
 
 @dataclass
 class ActionGroup:
     """A group or sequence of actions to be completed."""
-    actions: List["Action | ActionGroup | ActionControlNode"] = field(default_factory=list)
-    until: ActionConditionExpression | None = None
+    actions: List[ActionExecutable] = field(default_factory=list)
 
 @dataclass
 class ActionControlNode:
-    """A sequencing control node determinine action flow such as conditions or reptition."""
+    """A sequencing control node determinine action flow such as conditions or repetition."""
     control_operator: ControlOperator
-    branches: List[Tuple[ActionConditionExpression, ActionGroup]] | None = None
-    fail_path: "Action | ActionGroup | ActionControlNode" | None = None
-    control_node: "ActionControlNode" | None = None
-    until: ActionConditionExpression | None = None
+    node: ActionExecutable| None = None
+
+    branches: List[Tuple[ActionConditionExpression, ActionExecutable]] | None = None
+    fail_path: ActionExecutable | None = None
+
+    condition: ActionConditionExpression | None = None
+
+    success_path : ActionExecutable | None = None
+    error_path: ActionExecutable | None = None
+    finally_path: ActionExecutable | None = None
 
     def __post_init__(self):
         if self.control_operator == ControlOperator.IF:
             # There must be at least one branch
             assert(self.branches and len(self.branches) > 0)
 
-            # There must be a fail_path defined
-            assert(self.fail_path)
-
             # There should be no child control_node or until condition defined
-            assert(self.control_node is None)
-            assert(self.until is None)
+            assert(self.node is None)
+            assert(self.condition is None)
+            assert(self.success_path is None)
+            assert(self.error_path is None)
+            assert(self.finally_path is None)
         
-        if self.control_operator == ControlOperator.REPEAT:
-            # A control_node must be defined
-            assert(self.control_node is not None)
-
-            # An until condition must be defined
-            assert(self.until)
-
+        if self.control_operator == ControlOperator.WHILE or self.control_operator == ControlOperator.DO_WHILE:
+            # A child node and until condition must be defined
+            assert(self.node)
+            assert(self.condition)
+            
             # There should be no decision branches or fail_path defined
             assert(self.branches is None)
             assert(self.fail_path is None)
+            assert(self.success_path is None)
+            assert(self.error_path is None)
+            assert(self.finally_path is None)
+
+        if self.control_operator == ControlOperator.TRY:
+            # A child node must be defined, note that error_path and finally_path are optional
+            assert(self.node)
+
+            # There should be no decision, branches, or conditions
+            assert(self.branches is None)
+            assert(self.fail_path is None)
+            assert(self.condition is None)
+
+@dataclass
+class DeferredAction:
+    resolver: Callable[["CharacterAgent"], ActionExecutable]
 
 @dataclass(frozen=True)
 class ActionConditionExpression:
@@ -121,3 +183,7 @@ class ActionConditionExpression:
 
     def is_leaf(self) -> bool:
         return self.condition is not None
+
+@dataclass(frozen=True)
+class DeferredCondition:
+    resolver: Callable[["CharacterAgent"], ActionConditionExpression]

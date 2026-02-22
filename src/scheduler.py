@@ -7,7 +7,7 @@ import logging
 from collections import deque
 from typing import TYPE_CHECKING, Any, Dict
 
-from src.action import Action, ActionGroup, ActionCondition, ActionConditionExpression, ActionOutcome, LogicalOperator, ControlOperator, ActionControlNode
+from src.action import *
 from src.character import CharacterAgent
 from src.api import APIClient
 from src.worldstate import WorldState
@@ -22,7 +22,7 @@ class ActionScheduler:
 
         self.api_client = api_client
         self.agents: dict[str, CharacterAgent] = {}
-        self.queues: dict[str, deque[Action | ActionGroup | ActionControlNode]] = {}
+        self.queues: dict[str, deque[ActionExecutable]] = {}
         self.worker_tasks: dict[str, asyncio.Task] = {}
 
 
@@ -51,7 +51,7 @@ class ActionScheduler:
             self.logger.error(f"Task raised exception: {e}", exc_info=True)
 
 
-    def queue_action_node(self, character_name: str, node: Action | ActionGroup | ActionControlNode):
+    def queue_action_node(self, character_name: str, node: ActionExecutable):
         """Queue an `node` for evaluation and execution by the character's worker."""
         # Check the character exists (i.e. has a defined queue)
         if character_name in self.queues:
@@ -71,10 +71,6 @@ class ActionScheduler:
         self.logger.info(f"Worker started for {character_name}.")
         agent = self.agents[character_name]
         queue = self.queues[character_name]
-        
-        # If the agent has any residual cooldown, let it expire first
-        if agent.cooldown_expires_at == 0.0:
-            agent.cooldown_expires_at = datetime.datetime.strptime(agent.char_data.get("cooldown_expiration"), "%Y-%m-%dT%H:%M:%S.%fZ").timestamp()
 
         while True:
             if not queue:
@@ -84,22 +80,45 @@ class ActionScheduler:
             # Pop the next node and process
             node = queue.popleft()
             await self._process_node(agent, node)
-            self.logger.info(f"[{character_name}] Finished queued node.")
+            
+            # If the chain was aborted upwards, unset the flag so the agent can act again
+            if agent.abort_actions:
+                # Clear out any lingering bank reservations
+                agent.world_state.clear_bank_reservation(agent.name)
+                self.logger.warning(f"[{character_name}] Active node successfully aborted.")
+                agent.unset_abort_actions()
+            else:
+                self.logger.info(f"[{character_name}] Finished queued node.")
 
-    async def _process_node(self, agent: CharacterAgent, node: Action | ActionGroup | ActionControlNode) -> bool:
+    async def _process_node(self, agent: CharacterAgent, node: ActionExecutable) -> bool:
+        # Check for abort
+        if agent.abort_actions:
+            return False
+        
         if isinstance(node, Action):
             success = await self._process_single_action(agent, node)
         elif isinstance(node, ActionGroup):
-            success = await self._process_action_group(agent, node)
+            success = await self._process_group(agent, node)
         elif isinstance(node, ActionControlNode):
             success = await self._process_control_node(agent, node)
+        elif isinstance(node, DeferredAction):
+            deferred_node = node.resolver(agent)
+            success = await self._process_node(agent, deferred_node)
         else:
             raise Exception("Unrecognised node typing.")
 
         return success
 
     async def _process_single_action(self, agent: CharacterAgent, action: Action) -> bool:
-        """Process a single action to be made by an agent, repeating as defined."""
+        """Process a single action to be made by an agent, repeating as defined."""        
+        if type(action.type) is CharacterAction:
+            return await self._process_single_character_action(agent, action)
+        elif type(action.type) is MetaAction:
+            return await self._process_single_meta_action(agent, action)  
+        else:
+            raise Exception(f"Unknown instance tyoe of action: {type(action.type)}")     
+    
+    async def _process_single_character_action(self, agent: CharacterAgent, action: Action) -> bool:
         retry_count = 0
         retry_max = 3
 
@@ -109,6 +128,10 @@ class ActionScheduler:
             if remaining_cooldown > 0:
                 self.logger.debug(f"[{agent.name}] Waiting for cooldown: {round(remaining_cooldown)}s.")
                 await asyncio.sleep(remaining_cooldown)
+
+            # Check for abort
+            if agent.abort_actions:
+                return False
                                     
             # Execute the action
             outcome = await agent.perform(action)
@@ -116,9 +139,7 @@ class ActionScheduler:
             # Check action result
             match outcome:
                 case ActionOutcome.SUCCESS:
-                    # Check if the repeat until condition has been met for this action
-                    if self._evaluate_condition(agent, action.until):
-                        return True
+                    return True
                 
                 case ActionOutcome.FAIL:
                     self.logger.error(f"[{agent.name}] Action {action.type} failed.")
@@ -143,21 +164,43 @@ class ActionScheduler:
                     # A cancelled action can be treated as a success with no state updates
                     self.logger.debug(f"[{agent.name}] Action {action.type} was cancelled.")
                     return True
-
-    async def _process_action_group(self, agent: CharacterAgent, action_group: ActionGroup) -> bool:
-        """Process an action group, sequencing through all child actions, repeating as defined."""
-        while True:
-            # Traverse through the grouped actions and execute them in sequence
-            for sub_action in action_group.actions:
-                sub_action_successful = await self._process_node(agent, sub_action)
-
-                # If a sub_action was unsuccessful, discard the rest of the group
-                if not sub_action_successful:
-                    return False
                 
-            # Check if the repeat until condition has been met for this action
-            if self._evaluate_condition(agent, action_group.until):
-                break
+                case _:
+                    raise Exception(f"Unknown action outcome for CharacterAction: {outcome}")
+                
+
+    async def _process_single_meta_action(self, agent: CharacterAgent, action: Action) -> bool:
+        # Check for abort
+        if agent.abort_actions:
+            return False
+        
+        # Execute the action
+        context_update, outcome = await agent.world_state.perform(action)
+
+        # Check action result
+        match outcome:
+            case ActionOutcome.SUCCESS:
+                # Apply the context update to the agent
+                if context_update:
+                    agent.apply_context_update(context_update)
+                    
+                return True
+            
+            case ActionOutcome.FAIL:
+                return False
+                
+            case _:
+                raise Exception(f"Unknown action outcome for CharacterAction: {outcome}")
+
+    async def _process_group(self, agent: CharacterAgent, action_group: ActionGroup) -> bool:
+        """Process an action group, sequencing through all child actions, repeating as defined."""                    
+        # Traverse through the grouped actions and execute them in sequence
+        for sub_action in action_group.actions:
+            sub_action_successful = await self._process_node(agent, sub_action)
+
+            # If a sub_action was unsuccessful, discard the rest of the group
+            if not sub_action_successful:
+                return False
 
         return True
 
@@ -172,31 +215,65 @@ class ActionScheduler:
                     # No fail_path branch, therefore continue following the action sequence
                     return True
             
-            case ControlOperator.REPEAT:
-                while True:
-                    result = await self._process_node(agent, control_node.control_node)
+            case ControlOperator.WHILE:
+                # No executions should result in a successful node
+                result = True
+
+                # Check the repeat condition first, since it's a prerequisite for performing the child nodes
+                while self._evaluate_condition(agent, control_node.condition):
+                    result = await self._process_node(agent, control_node.node)
 
                     # Break out if the sub node has failed
                     if not result:
                         return result
 
-                    # Check if the repeat until condition has been met for this action
-                    if self._evaluate_condition(agent, control_node.until):
-                        break
-
                 return result
+
+            case ControlOperator.DO_WHILE:
+                while True:
+                    result = await self._process_node(agent, control_node.node)
+
+                    # Break out if the sub node has failed
+                    if not result:
+                        return result
+                    
+                    # Check the repeat condition last to see if we should repeat
+                    if not self._evaluate_condition(agent, control_node.condition):
+                        break
                 
-    def _evaluate_control_branches(self, agent: CharacterAgent, control_node: ActionControlNode) -> Action | ActionGroup:
+                return result
+            
+            case ControlOperator.TRY:
+                result = await self._process_node(agent, control_node.node)
+
+                # If the try group succeeded, execeute the success path, should one exist
+                if result and control_node.success_path:
+                    result = await self._process_node(agent, control_node.success_path)
+
+                # If the try group failed, execute the error path, should one exist
+                if not result and control_node.error_path:
+                    result = await self._process_node(agent, control_node.error_path)
+
+                # If a finally path exists, always execute
+                if control_node.finally_path:
+                    result = await self._process_node(agent, control_node.finally_path)
+                
+                return result
+
+    def _evaluate_control_branches(self, agent: CharacterAgent, control_node: ActionControlNode) -> Action | ActionGroup | ActionControlNode | None:
         for branch in control_node.branches:
             if self._evaluate_condition(agent, branch[0]):
                 return branch[1]
             
         return control_node.fail_path
 
-    def _evaluate_condition(self, agent: CharacterAgent, expression: ActionConditionExpression) -> bool:
+    def _evaluate_condition(self, agent: CharacterAgent, expression: ActionConditionExpression | DeferredCondition) -> bool:
         """Evaluate a condition expression path."""
         if not expression:
             return True
+        
+        if type(expression) is DeferredCondition:
+            expression = expression.resolver(agent)
            
         if expression.is_leaf():
             # If at a leaf node, evaluate the condition
@@ -205,8 +282,8 @@ class ActionScheduler:
             condition_met = False
             match expression.condition:
                 case ActionCondition.FOREVER:
-                    # Forever meaning the condition will never be met, therefore FALSE.
-                    condition_met = False
+                    # Forever meaning the condition will always me bet, therefore TRUE.
+                    condition_met = True
                 
                 case ActionCondition.INVENTORY_FULL:
                     condition_met = agent.inventory_full()
@@ -223,7 +300,7 @@ class ActionScheduler:
                     needed_space = 0
                     for item in items:
                         needed_quantity = item["quantity"]
-                        current_quantity = agent.get_quantity_of_item_in_inventory(item["item"])
+                        current_quantity = agent.get_quantity_of_item_in_inventory(item["code"])
                         needed_space += needed_quantity - current_quantity
 
                     condition_met = agent.inventory_has_available_space(needed_space)
@@ -242,6 +319,46 @@ class ActionScheduler:
                     item = expression.parameters["item"]
                     quantity = expression.parameters["quantity"]
                     condition_met = agent.bank_and_inventory_have_item_of_quantity(item, quantity)
+                    
+                case ActionCondition.INVENTORY_CONTAINS_USABLE_FOOD:
+                    condition_met = agent.inventory_contains_usable_food()
+                    
+                case ActionCondition.BANK_CONTAINS_USABLE_FOOD:
+                    condition_met = agent.bank_contains_usable_food()
+                
+                case ActionCondition.HEALTH_LOW_ENOUGH_TO_EAT:
+                    condition_met = agent.health_sufficiently_low_to_heal()
+
+                case ActionCondition.ITEMS_IN_EQUIP_QUEUE:
+                    condition_met = agent.items_in_equip_queue()
+
+                case ActionCondition.HAS_TASK:
+                    condition_met = agent.has_task()
+
+                case ActionCondition.HAS_TASK_OF_TYPE:
+                    task_type = expression.parameters["task_type"]
+                    condition_met = agent.has_task_of_type(task_type)
+
+                case ActionCondition.TASK_COMPLETE:
+                    condition_met = agent.has_completed_task()
+
+                case ActionCondition.HAS_SKILL_LEVEL:
+                    skill = expression.parameters["skill"]
+                    level = expression.parameters["level"]
+                    condition_met = agent.has_skill_level(skill, level)
+
+                case ActionCondition.RESOURCE_FROM_GATHERING:
+                    resource = expression.parameters["resource"]
+                    condition_met = agent.world_state.item_from_gathering(resource)
+
+                case ActionCondition.RESOURCE_FROM_FIGHTING:
+                    resource = expression.parameters["resource"]
+                    condition_met = agent.world_state.item_from_fighting(resource)
+
+                case ActionCondition.CONTEXT_COUNTER_AT_VALUE:
+                    counter_name = expression.parameters["name"]
+                    counter_value = expression.parameters["value"]
+                    condition_met = agent.counter_at_value(counter_name, counter_value)
 
                 case _:
                     raise NotImplementedError()
@@ -266,3 +383,6 @@ class ActionScheduler:
                 
                 case LogicalOperator.NOT:
                     return not self._evaluate_condition(agent, expression.children[0])
+                
+                case _:
+                    raise Exception(f"Unknown logical operator: {expression.operator}")

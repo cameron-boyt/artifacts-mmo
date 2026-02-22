@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 
 from src.action import ActionCondition, ActionConditionExpression, LogicalOperator, ActionControlNode
 
@@ -38,18 +38,18 @@ def cond__item_qty_in_inv(item: str, quantity: int) -> ActionConditionExpression
         quantity=quantity
     )
 
-def cond__items_in_inv(items: List[Tuple[str, int]]) -> ActionConditionExpression:
+def cond__items_in_inv(items: List[Dict[str, Any]]) -> ActionConditionExpression:
     if len(items) == 1:
-        item = items[0]["item"]
+        item = items[0]["code"]
         quantity = items[0]["quantity"]
         return cond__item_qty_in_inv(item, quantity)
     else:
         return AND(*[
-            cond__item_qty_in_inv(item["item"], item["quantity"])
+            cond__item_qty_in_inv(item["code"], item["quantity"])
             for item in items
         ])
 
-def cond__inv_has_space_for_items(items: List[Tuple[str, int]]) -> ActionConditionExpression:
+def cond__inv_has_space_for_items(items: List[Dict[str, Any]]) -> ActionConditionExpression:
     return cond(
         ActionCondition.INVENTORY_HAS_AVAILABLE_SPACE_FOR_ITEMS,
         items=items
@@ -63,14 +63,14 @@ def cond__item_qty_in_bank(item: str, quantity: int)-> ActionConditionExpression
         quantity=quantity
     )
 
-def cond__items_in_bank(items: List[Tuple[str, int]]) -> ActionConditionExpression:
+def cond__items_in_bank(items: List[Dict[str, Any]]) -> ActionConditionExpression:
     if len(items) == 1:
-        item = items[0]["item"]
+        item = items[0]["code"]
         quantity = items[0]["quantity"]
         return cond__item_qty_in_bank(item, quantity)
     else:
         return AND(*[
-            cond__item_qty_in_bank(item["item"], item["quantity"])
+            cond__item_qty_in_bank(item["code"], item["quantity"])
             for item in items
         ])
 
@@ -82,13 +82,13 @@ def cond__item_qty_in_inv_and_bank(item: str, quantity: int) -> ActionConditionE
         quantity=quantity
     )
 
-def cond__items_in_inv_and_bank(items: List[Tuple[str, int]]) -> ActionConditionExpression:
+def cond__items_in_inv_and_bank(items: List[Dict[str, Any]]) -> ActionConditionExpression:
     if len(items) == 1:
-        item = items[0]["item"]
+        item = items[0]["code"]
         quantity = items[0]["quantity"]
         return cond__item_qty_in_inv_and_bank(item, quantity)
     else:
         return AND(*[
-            cond__item_qty_in_inv_and_bank(item["item"], item["quantity"])
+            cond__item_qty_in_inv_and_bank(item["code"], item["quantity"])
             for item in items
         ])

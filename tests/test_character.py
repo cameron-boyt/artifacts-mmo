@@ -16,11 +16,90 @@ def set_inv(agent: CharacterAgent, inv: dict[str, int]) -> None:
 @pytest.fixture
 def agent() -> CharacterAgent:
     character_data = {
-        "name": "Test Agent",
+        "name": "Test Agnt",
+        "account": "Test Account",
+        "skin": "men1",
+        "level": 1,
+        "xp": 0,
+        "max_xp": 0,
+        "gold": 0,
+        "speed": 0,
+        "mining_level": 1,
+        "mining_xp": 0,
+        "mining_max_xp": 0,
+        "woodcutting_level": 1,
+        "woodcutting_xp": 0,
+        "woodcutting_max_xp": 0,
+        "fishing_level": 1,
+        "fishing_xp": 0,
+        "fishing_max_xp": 0,
+        "weaponcrafting_level": 1,
+        "weaponcrafting_xp": 0,
+        "weaponcrafting_max_xp": 0,
+        "gearcrafting_level": 1,
+        "gearcrafting_xp": 0,
+        "gearcrafting_max_xp": 0,
+        "jewelrycrafting_level": 1,
+        "jewelrycrafting_xp": 0,
+        "jewelrycrafting_max_xp": 0,
+        "cooking_level": 1,
+        "cooking_xp": 0,
+        "cooking_max_xp": 0,
+        "alchemy_level": 1,
+        "alchemy_xp": 0,
+        "alchemy_max_xp": 0,
+        "hp": 100,
+        "max_hp": 100,
+        "haste": 0,
+        "critical_strike": 0,
+        "wisdom": 0,
+        "prospecting": 0,
+        "initiative": 0,
+        "threat": 0,
+        "attack_fire": 0,
+        "attack_earth": 0,
+        "attack_water": 0,
+        "attack_air": 0,
+        "dmg": 0,
+        "dmg_fire": 0,
+        "dmg_earth": 0,
+        "dmg_water": 0,
+        "dmg_air": 0,
+        "res_fire": 0,
+        "res_earth": 0,
+        "res_water": 0,
+        "res_air": 0,
+        "effects": [],
         "x": 0,
         "y": 0,
-        "inventory": {},
+        "layer": "overworld",
+        "map_id": 1,
+        "cooldown": 0,
+        "cooldown_expiration": "2026-02-13T00:04:01.609Z",
+        "weapon_slot": "",
+        "rune_slot": "",
+        "shield_slot": "",
+        "helmet_slot": "",
+        "body_armor_slot": "",
+        "leg_armor_slot": "",
+        "boots_slot": "",
+        "ring1_slot": "",
+        "ring2_slot": "",
+        "amulet_slot": "",
+        "artifact1_slot": "",
+        "artifact2_slot": "",
+        "artifact3_slot": "",
+        "utility1_slot": "",
+        "utility1_slot_quantity": 0,
+        "utility2_slot": "",
+        "utility2_slot_quantity": 0,
+        "bag_slot": "",
+        "task": "",
+        "task_type": "",
+        "task_progress": 0,
+        "task_total": 0,
         "inventory_max_items": 100,
+        "inventory": []
     }
 
     world_state = MagicMock()
@@ -53,27 +132,27 @@ def test__get_closest_location(agent: CharacterAgent, start, locations, expected
 #_construct_item_list
 def order_single_exact(code: str, qty: int, greedy=False, check_inv=False):
     return ItemOrder(
-        items=[ItemSelection(code, ItemQuantity(min=qty, max=qty))],
+        items=[ItemSelection(item=code, quantity=ItemQuantity(min=qty, max=qty))],
         greedy_order=greedy,
         check_inv=check_inv,
     )
 
 def order_single_range(code: str, min_q: int | None, max_q: int | None, check_inv=False):
     return ItemOrder(
-        items=[ItemSelection(code, ItemQuantity(min=min_q, max=max_q))],
+        items=[ItemSelection(item=code, quantity=ItemQuantity(min=min_q, max=max_q))],
         check_inv=check_inv,
     )
 
 def order_single_multiple_of(code: str, min_q: int | None, max_q: int | None, multiple_of: int, check_inv=False):
     return ItemOrder(
-        items=[ItemSelection(code, ItemQuantity(min=min_q, max=max_q, multiple_of=multiple_of))],
+        items=[ItemSelection(item=code, quantity=ItemQuantity(min=min_q, max=max_q, multiple_of=multiple_of))],
         check_inv=check_inv,
     )
 
 def order_multi(items: list[tuple[str, ItemQuantity]], greedy=False, check_inv=False) -> ItemOrder:
     """Helper to define multi-item orders compactly in test cases."""
     return ItemOrder(
-        items=[ItemSelection(code, qty) for code, qty in items],
+        items=[ItemSelection(item=code, quantity=qty) for code, qty in items],
         greedy_order=greedy,
         check_inv=check_inv,
     )
@@ -395,6 +474,18 @@ def test__get_quantity_of_item_in_inventory(agent: CharacterAgent, inv, item, ex
     result = agent.get_quantity_of_item_in_inventory(item)
     assert result == expected
 
+#set_abort_actions
+def test__set_abort_actions(agent: CharacterAgent):
+    agent.abort_actions = False
+    agent.set_abort_actions()
+    assert agent.abort_actions == True
+
+#unset_abort_actions()
+def test__unset_abort_actions(agent: CharacterAgent):
+    agent.abort_actions = True
+    agent.unset_abort_actions()
+    assert agent.abort_actions == False
+
 ## Condition Checkers
 #inventory_full
 @pytest.mark.parametrize(
@@ -481,12 +572,12 @@ def test__bank_has_item_of_quantity(agent: CharacterAgent, bank, item, quantity,
     "inv,bank,item,quantity,expected",
     [
         pytest.param({}, {}, "copper_ore", 10, False, id="both_empty"),
-        pytest.param({}, { "cooper_ore": 3 }, "copper_ore", 10, False, id="bank_empty__inv_insufficient"),
-        pytest.param({ "cooper_ore": 3 }, {}, "copper_ore", 10, False, id="bank_insufficient__inv_empty"),
-        pytest.param({ "cooper_ore": 3 }, { "cooper_ore": 5 }, "copper_ore", 10, False, id="both_insufficient__total_insufficient"),
-        pytest.param({ "cooper_ore": 6 }, { "cooper_ore": 5 }, "copper_ore", 10, False, id="both_insufficient__total_sufficient"),
-        pytest.param({}, { "cooper_ore": 11 }, "copper_ore", 10, False, id="bank_sufficient"),
-        pytest.param({ "cooper_ore": 11 }, {}, "copper_ore", 10, False, id="inv_sufficient"),
+        pytest.param({}, { "copper_ore": 3 }, "copper_ore", 10, False, id="bank_empty__inv_insufficient"),
+        pytest.param({ "copper_ore": 3 }, {}, "copper_ore", 10, False, id="bank_insufficient__inv_empty"),
+        pytest.param({ "copper_ore": 3 }, { "copper_ore": 5 }, "copper_ore", 10, False, id="both_insufficient__total_insufficient"),
+        pytest.param({ "copper_ore": 6 }, { "copper_ore": 5 }, "copper_ore", 10, True, id="both_insufficient__total_sufficient"),
+        pytest.param({}, { "copper_ore": 11 }, "copper_ore", 10, True, id="bank_sufficient"),
+        pytest.param({ "copper_ore": 11 }, {}, "copper_ore", 10, True, id="inv_sufficient"),
     ]
 )
 
@@ -494,5 +585,34 @@ def test__bank_and_inventory_have_item_of_quantity(agent: CharacterAgent, inv, b
     set_inv(agent, inv)
     set_bank(agent, bank)
     result = agent.bank_and_inventory_have_item_of_quantity(item, quantity)
+    assert result == expected
+
+#has_task
+@pytest.mark.parametrize(
+    "task,expected",
+    [
+        pytest.param("chicken", True, id="has_task"),
+        pytest.param("", False, id="no_task"),
+    ]
+)
+
+def test__has_task(agent: CharacterAgent, task, expected):
+    agent.char_data["task"] = task
+    result = agent.has_task()
+    assert result == expected
+    
+#items_in_equip_queue
+@pytest.mark.parametrize(
+    "context,expected",
+    [
+        pytest.param({}, False, id="not_defined"),
+        pytest.param({ "equip_queue": [] }, False, id="no_withdrawals"),
+        pytest.param({ "equip_queue": [{ "code": "copper_helmet", "quantity": 1 }] }, True, id="has_withdrawals"),
+    ]
+)
+
+def test__items_in_equip_queue(agent: CharacterAgent, context, expected):
+    agent.context = context
+    result = agent.items_in_equip_queue()
     assert result == expected
     

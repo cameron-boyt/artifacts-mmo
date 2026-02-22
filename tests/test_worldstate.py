@@ -1,5 +1,6 @@
 import pytest
 import json
+from unittest.mock import MagicMock
 
 from src.worldstate import WorldState
 
@@ -36,21 +37,6 @@ def world_state() -> WorldState:
 
 def test__is_an_item(world_state: WorldState, item, expected):
     result = world_state.is_an_item(item)
-    assert result == expected
-
-#is_equipment
-@pytest.mark.parametrize(
-    "item,expected",
-    [
-        pytest.param("copper_pickaxe", True, id="is_equipment"),
-        pytest.param("copper_ore", False, id="is_item"),
-        pytest.param("chicken", False, id="is_monster"),
-        pytest.param("fake", False, id="is_fake"),
-    ]
-)
-
-def test__is_equipment(world_state: WorldState, item, expected):
-    result = world_state.is_equipment(item)
     assert result == expected
 
 #get_item_info
@@ -146,6 +132,21 @@ def test__get_workshop_locations(world_state: WorldState, skill, expected, excep
             world_state.get_workshop_locations(skill)
     else:
         assert world_state.get_workshop_locations(skill)
+## Equipment Checkers
+#is_equipment
+@pytest.mark.parametrize(
+    "item,expected",
+    [
+        pytest.param("copper_pickaxe", True, id="is_equipment"),
+        pytest.param("copper_ore", False, id="is_item"),
+        pytest.param("chicken", False, id="is_monster"),
+        pytest.param("fake", False, id="is_fake"),
+    ]
+)
+
+def test__is_equipment(world_state: WorldState, item, expected):
+    result = world_state.is_equipment(item)
+    assert result == expected
 
 #get_equip_slot_for_item
 @pytest.mark.parametrize(
@@ -165,41 +166,108 @@ def test__get_equip_slot_for_item(world_state: WorldState, item, expected, excep
     else:
         result = world_state.get_equip_slot_for_item(item)
         assert result == expected
-    
-#get_best_tool_for_skill_in_bank
+
+#is_tool
 @pytest.mark.parametrize(
-    "bank,skill,expected",
+    "item,expected",
     [
-        pytest.param([], "mining", None, id="bank_empty"),
-        pytest.param({ "copper_pickaxe": 1 }, "mining", ("copper_pickaxe", -10), id="bank_has_tool"),
-        pytest.param({ "copper_pickaxe": 1, "iron_pickaxe": 1 }, "mining", ("iron_pickaxe", -20), id="bank_has_multiple_tools"),
-        pytest.param({ "copper_pickaxe": 1, "iron_pickaxe": 1, "iron_axe": 1 }, "mining", ("iron_pickaxe", -20), id="bank_has_multiple_tools__multiple_skills__mining"),
-        pytest.param({ "copper_pickaxe": 1, "iron_pickaxe": 1, "iron_axe": 1 }, "woodcutting", ("iron_axe", -20), id="bank_has_multiple_tools__multiple_skills__woodcutting"),
+        pytest.param("copper_pickaxe", True, id="is_tool"),
+        pytest.param("copper_ore", False, id="is_item"),
+        pytest.param("chicken", False, id="is_monster"),
+        pytest.param("fake", False, id="is_fake"),
     ]
 )
 
-def test__get_best_tool_for_skill_in_bank(world_state: WorldState, bank, skill, expected):
-    world_state._bank_data = bank
-    result = world_state.get_best_tool_for_skill_in_bank(skill)
+def test__is_tool(world_state: WorldState, item, expected):
+    result = world_state.is_tool(item)
     assert result == expected
     
-#get_best_weapon_for_monster_in_bank
+#is_weapon
 @pytest.mark.parametrize(
-    "bank,monster,expected",
+    "item,expected",
     [
-        pytest.param({}, "chicken", None, id="bank_empty"),
-        pytest.param({ "copper_pickaxe": 1 }, "chicken", ("copper_pickaxe", 5), id="bank_has_weapon"),
-        pytest.param({ "copper_pickaxe": 1, "mushstaff": 1 }, "chicken", ("mushstaff", 30), id="bank_has_multiple_weapons"),
-        pytest.param({ "fire_staff": 1, "water_bow": 1 }, "cow", ("fire_staff", 16), id="bank_has_multiple_tools__multiple_skills__water_resistence"),
-        pytest.param({ "fire_staff": 1, "water_bow": 1 }, "wolf", ("fire_staff", 17), id="bank_has_multiple_tools__fire_weakness"),
+        pytest.param("sticky_sword", True, id="is_weapon"),
+        pytest.param("copper_pickaxe", True, id="is_tool"),
+        pytest.param("chicken", False, id="is_monster"),
+        pytest.param("fake", False, id="is_fake"),
     ]
 )
 
-def test__get_best_weapon_for_monster_in_bank(world_state: WorldState, bank, monster, expected):
-    world_state._bank_data = bank
-    result = world_state.get_best_weapon_for_monster_in_bank(monster)
+def test__is_weapon(world_state: WorldState, item, expected):
+    result = world_state.is_weapon(item)
+    assert result == expected
+
+#is_armour
+@pytest.mark.parametrize(
+    "item,expected",
+    [
+        pytest.param("copper_helmet", True, id="is_armour"),
+        pytest.param("sticky_sword", False, id="is_weapon"),
+        pytest.param("chicken", False, id="is_monster"),
+        pytest.param("fake", False, id="is_fake"),
+    ]
+)
+
+def test__is_armour(world_state: WorldState, item, expected):
+    result = world_state.is_armour(item)
+    assert result == expected
+
+#is_food
+@pytest.mark.parametrize(
+    "item,expected",
+    [
+        pytest.param("cooked_gudgeon", True, id="is_food"),
+        pytest.param("small_health_potion", False, id="is_consumable"),
+        pytest.param("chicken", False, id="is_monster"),
+        pytest.param("fake", False, id="is_fake"),
+    ]
+)
+
+def test__is_food(world_state: WorldState, item, expected):
+    result = world_state.is_food(item)
     assert result == expected
     
+#get_best_food_for_character_in_bank
+@pytest.mark.parametrize(
+    "bank,char,expected",
+    [
+        pytest.param({}, { "max_hp": 100 }, None, id="bank_empty"),
+        pytest.param({ "cooked_gudgeon": 1 }, { "level": 1, "max_hp": 100 }, "cooked_gudgeon", id="one_food_in_bank"),
+        pytest.param({ "cooked_hellhound_meat": 1 }, { "level": 1, "max_hp": 100 }, None, id="one_food_in_bank__insufficient_level"),
+        pytest.param({ "cooked_hellhound_meat": 1 }, { "level": 50, "max_hp": 100 }, "cooked_hellhound_meat", id="one_food_in_bank__heals_more_than_max_hp"),
+        pytest.param({ "cooked_gudgeon": 1, "cooked_chicken": 1 }, { "level": 50, "max_hp": 100 }, "cooked_chicken", id="multiple_food_in_bank"),
+        pytest.param({ "cooked_gudgeon": 1, "cooked_hellhound_meat": 1 }, { "level": 50, "max_hp": 100 }, "cooked_gudgeon", id="multiple_food_in_bank__heals_more_than_max_hp"),
+        pytest.param({ "cooked_gudgeon": 1, "cooked_hellhound_meat": 1 }, { "level": 1, "max_hp": 10000 }, "cooked_gudgeon", id="multiple_food_in_bank__insuffucient_level"),
+    ]
+)
+
+def test__get_best_food_for_character_in_bank(world_state: WorldState, bank, char, expected):
+    world_state._bank_data = bank
+    result = world_state.get_best_food_for_character_in_bank(char)
+    if expected is None:
+        assert result is None
+    else:
+        assert result[0] == expected
+
+#get_heal_power_of_food
+@pytest.mark.parametrize(
+    "food,expected,exception",
+    [
+        pytest.param("cooked_gudgeon", 75, None, id="is_food"),
+        pytest.param("small_health_potion", None, KeyError, id="is_consumable"),
+        pytest.param("copper_pickaxe", None, KeyError, id="is_tool"),
+        pytest.param("fake", None, KeyError, id="is_fake"),
+    ]
+)
+
+def test__get_heal_power_of_food(world_state: WorldState, food, expected, exception):
+    if exception:
+        with pytest.raises(exception):
+            world_state.get_heal_power_of_food(food)
+    else:
+        result = world_state.get_heal_power_of_food(food)
+        assert result == expected
+
 # Resource Checkers
 #is_a_resource
 @pytest.mark.parametrize(
@@ -367,4 +435,24 @@ def test__update_bank_data(world_state: WorldState):
     ])
     assert world_state.get_amount_of_item_in_bank("copper_ore") == 10
     assert world_state.get_amount_of_item_in_bank("iron_ore") == 0
- 
+
+# Other Checkers
+#get_task_master_locations
+def test__get_task_master_locations(world_state: WorldState):
+    assert world_state.get_task_master_locations()
+
+
+
+
+
+
+# test
+def test__get_best_loadout_for_fighting(world_state: WorldState):
+    result = world_state.get_best_loadout_for_task({ "hp": 1, "max_hp": 100, "level": 5, "initiative": 100, "inventory": []}, "fighting", "blue_slime")
+    assert result
+
+
+def test__get_best_loadout_for_gathering(world_state: WorldState):
+    result = world_state.get_best_loadout_for_task({ "hp": 1, "max_hp": 100, "level": 5, "initiative": 100, "inventory": []}, "gathering", "iron_ore")
+    assert result
+    
