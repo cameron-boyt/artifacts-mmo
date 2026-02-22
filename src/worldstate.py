@@ -554,10 +554,14 @@ class WorldState:
         if item_reservation["quantity"] == 0:
             del self.bank_reservations[character][item]
 
-    def clear_bank_reservation(self, character, item: str):
+    def clear_bank_reservation(self, character, item: str | None = None):
         if char_reservations := self.bank_reservations.get(character, {}):
-            if item in char_reservations:
+            if not item:
+                del self.bank_reservations[character]
+            elif item in char_reservations:
                 del self.bank_reservations[character][item]
+            else:
+                raise Exception(f"Could not find reservation of {item} for {character}") 
         
     def get_amount_of_item_reserved_in_bank(self, item: str) -> int:
         amount_reserved = 0

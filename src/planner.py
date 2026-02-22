@@ -199,7 +199,7 @@ class ActionPlanner:
                             move(closest_of=locations)
                         ),
                         error_path=clear_prepared_loadout(),
-                        finally_path=DeferredAction(lambda agent: clear_item_reservations(name=agent.name, items=agent.context["prepared_loadout"]))
+                        finally_path=DeferredAction(lambda agent: clear_item_reservations(name=agent.name, items=[i["code"]for i in agent.context["prepared_loadout"]]))
                     )
                 )
             
@@ -409,7 +409,7 @@ class ActionPlanner:
                                 DeferredAction(lambda agent: self.plan(ActionIntent(
                                     Intention.FIGHT_MONSTERS, 
                                     monster=agent.world_state._drop_sources[material["code"]][0],
-                                    condition=cond__item_qty_in_inv_and_bank(material["code"], material["quantity"])
+                                    condition=NOT(cond__item_qty_in_inv_and_bank(material["code"], material["quantity"]))
                                 )))
                             ),
                             (
@@ -417,9 +417,18 @@ class ActionPlanner:
                                 self.plan(ActionIntent(
                                     Intention.GATHER_RESOURCES,
                                     resource=material["code"],
-                                    condition=cond__item_qty_in_inv_and_bank(material["code"], material["quantity"])
+                                    condition=NOT(cond__item_qty_in_inv_and_bank(material["code"], material["quantity"]))
                                 ))
-                            )
+                            ),
+                            # (
+                            #     cond(ActionCondition.RESOURCE_FROM_TASKS, resource=material["code"]),
+                            #     self.plan(ActionIntent(
+                            #         Intention.COMPLETE_TASKS,
+                            #         resource=material["code"],
+                            #         condition=NOT(cond__item_qty_in_inv_and_bank(material["code"], material["quantity"]))
+                            #     ))
+                            # ),
+                            fail_path=fail_action()
                         )
                         for material in augment_req_mats(agent.get_inventory_size())
                     ]))
@@ -450,7 +459,7 @@ class ActionPlanner:
                                                 self.plan(ActionIntent(Intention.WITHDRAW_ITEMS, items=augment_req_mats(agent.get_inventory_size()))),
                                                 finally_path=clear_item_reservations(
                                                     name=agent.name, 
-                                                    items=[{ "code": i["code"], "quantity": -i["quantity"] } for i in augment_req_mats(agent.get_inventory_size())]
+                                                    items=[i["code"] for i in augment_req_mats(agent.get_inventory_size())]
                                                 )
                                             )
                                         )
@@ -458,7 +467,7 @@ class ActionPlanner:
                                 ),
                                 TRY(
                                     self.plan(ActionIntent(Intention.CRAFT, item=craft_item, quantity=craft_qty if not craft_max else agent.get_inventory_size() // total_materials)),
-                                    success_path=DeferredAction(lambda agent: increment_context_counter(name=context_counter, value=agent.context["last_craft"]["value"])),
+                                    success_path=DeferredAction(lambda agent: increment_context_counter(name=context_counter, value=agent.context["last_craft"]["quantity"])),
                                     error_path=group(
                                         clear_context_counter(name=context_counter),
                                         fail_action()

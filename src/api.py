@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import asyncio
 import httpx
 import json
 from typing import List, Dict, Any
@@ -79,7 +80,7 @@ class APIClient:
 
     ## API General Requests for Characters
     async def try_request(self, url: str, payload: Any | None = None) -> APIResult:
-        for i in range(3):
+        for i in range(1, 4):
             try:
                 if payload:
                     response = await self._client.post(url, json=payload)
@@ -87,9 +88,11 @@ class APIClient:
                     response = await self._client.post(url)
             except httpx.ReadTimeout:
                 self.logger.warning(f"Request timed out for '{url}', attempt {i} of 3.")
+                await asyncio.sleep(5 * i)
                 continue
             except httpx.ConnectTimeout:
                 self.logger.warning(f"Request timed out for '{url}', attempt {i} of 3.")
+                await asyncio.sleep(5 * i)
                 continue
 
             break

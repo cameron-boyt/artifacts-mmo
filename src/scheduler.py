@@ -83,6 +83,8 @@ class ActionScheduler:
             
             # If the chain was aborted upwards, unset the flag so the agent can act again
             if agent.abort_actions:
+                # Clear out any lingering bank reservations
+                agent.world_state.clear_bank_reservation(agent.name)
                 self.logger.warning(f"[{character_name}] Active node successfully aborted.")
                 agent.unset_abort_actions()
             else:
