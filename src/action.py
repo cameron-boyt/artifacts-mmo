@@ -49,8 +49,9 @@ class ActionCondition(Enum):
 
     ITEMS_IN_EQUIP_QUEUE = auto()
 
-    RESOURCE_FROM_GATHERING = auto()
     RESOURCE_FROM_FIGHTING = auto()
+    RESOURCE_FROM_GATHERING = auto()
+    RESOURCE_FROM_CRAFTING = auto()
 
     HAS_TASK = auto()
     HAS_TASK_OF_TYPE = auto()

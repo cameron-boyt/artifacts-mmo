@@ -117,6 +117,10 @@ class WorldState:
 
         return item_stat_vectors
     
+    # Bank Stuff
+    def get_bank_items(self) -> Dict[str, int]:
+        return self._bank_data
+    
     # Item Checkers
     def is_an_item(self, item: str) -> bool:
         return item in self._item_data
@@ -133,11 +137,14 @@ class WorldState:
         
         return self._item_data[item].get("craft") is not None
     
+    def item_from_fighting(self, item: str) -> bool:
+        return item in self._drop_sources
+    
     def item_from_gathering(self, item: str) -> bool:
         return item in self._resource_to_tile
     
-    def item_from_fighting(self, item: str) -> bool:
-        return item in self._drop_sources
+    def item_from_crafting(self, item: str) -> bool:
+        return self.item_is_craftable(item)
     
     def get_crafting_materials_for_item(self, item: str) -> List[Dict[str, Any]] | None:
         if not self.item_is_craftable(item):
@@ -158,7 +165,7 @@ class WorldState:
         
         raise KeyError(f"{skill} is not a skill.")
     
-    def character_meets_conditions_for_item(self, character: dict, conditions: list) -> bool:
+    def character_meets_item_conditions(self, character: dict, conditions: list) -> bool:
         for condition in conditions:
             match condition["code"]:
                 case "level" | "mining_level" | "woodcutting_level" | "fishing_level" | "weaponcrafting_level" | \
@@ -185,6 +192,16 @@ class WorldState:
                 return False
             
         return True
+    
+    def character_meets_crafting_conditions(self, character: dict, item: str) -> bool:
+        item_info = self.get_item_info(item)
+        if self.item_is_craftable(item):
+            craft_skill = item_info.get("craft").get("skill")
+            craft_level = item_info.get("craft").get("level")
+            return character.get(f"{craft_skill}_level") >= craft_level
+        else:
+            raise Exception(f"Item {item} is not craftable")
+
     
     # Equipment Checkers
     def is_equipment(self, item: str) -> bool:
@@ -228,7 +245,7 @@ class WorldState:
             best_food = self.get_best_food_for_character_in_bank(character)
             if best_food:
                 food_amount = self.get_amount_of_item_in_bank(best_food)
-                final_loadout.extend({ "code": best_food, "quantity": min(50, food_amount) })
+                final_loadout.append({ "code": best_food, "quantity": min(50, food_amount) })
 
         return final_loadout, equip_queue
     
@@ -336,7 +353,7 @@ class WorldState:
         for item in items_to_check:
             item_data = self._item_data[item]
 
-            if not self.character_meets_conditions_for_item(character, item_data["conditions"]):
+            if not self.character_meets_item_conditions(character, item_data["conditions"]):
                 continue
 
             if self.is_weapon(item):
@@ -403,7 +420,7 @@ class WorldState:
         foods = [
             item for item in self._bank_data 
             if self.is_food(item)
-            and self.character_meets_conditions_for_item(character, self._item_data[item]["conditions"])
+            and self.character_meets_item_conditions(character, self._item_data[item]["conditions"])
         ]
 
         if len(foods) > 0:
@@ -414,7 +431,7 @@ class WorldState:
 
             # Preference for food: heal <= max_hp sort in descending order, then, heal > max_hp in ascending order.
             best_food = max(food_power, key=lambda f: f[1] if f[1] <= character["max_hp"] else -1 * f[1])
-            return best_food
+            return best_food[0]
         else:
             return None
         
@@ -479,6 +496,16 @@ class WorldState:
         
         locations = self._interactions.monsters[monster]
         return locations
+    
+    def get_monster_for_item(self, resource: str) -> str:
+        sources = self._drop_sources[resource]
+
+        if len(sources) == 1:
+            return sources[0]
+        else:
+            # Eventually implement some logic to determine the best sources
+            # Calculate kills times / drop rate etc.
+            return sources[0]
 
     def _evaluate_loadout_for_fighting(self, character: dict, monster: str) -> Tuple[bool, int, int]:
         if not self.is_a_monster(monster):
@@ -629,8 +656,14 @@ class WorldState:
             
             case MetaAction.INCREMENT_CONTEXT_COUNTER:
                 counter_name = action.params.get("name")
-                counter_value = action.params.get("value")
-                context_update = { counter_name: counter_value }
+                counter_value = action.params.get("value", 0)
+                counter_value_keys = action.params.get("value_keys", [])
+                
+                if counter_value_keys:
+                    context_update = { counter_name: counter_value_keys }
+                else:
+                    context_update = { counter_name: counter_value }
+
                 return context_update, ActionOutcome.SUCCESS
             
             case MetaAction.CLEAR_CONTEXT_COUNTER:
@@ -643,3 +676,4 @@ class WorldState:
 
             case _:
                 raise Exception(f"[World] Unknown action type: {action.type}")
+            

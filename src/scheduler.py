@@ -8,36 +8,38 @@ from collections import deque
 from typing import TYPE_CHECKING, Any, Dict
 
 from src.action import *
-from src.character import CharacterAgent
-from src.api import APIClient
-from src.worldstate import WorldState
+
+from src.character import AgentMode
 
 if TYPE_CHECKING:
     from src.character import CharacterAgent
+    from src.goalcoordinator import GoalCoordinator
 
 class ActionScheduler:
     """Manages action queues and worker tasks for all characters."""
-    def __init__(self, api_client: APIClient):
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
 
-        self.api_client = api_client
+        self.coordinator: GoalCoordinator
+
         self.agents: dict[str, CharacterAgent] = {}
         self.queues: dict[str, deque[ActionExecutable]] = {}
         self.worker_tasks: dict[str, asyncio.Task] = {}
 
-
     def get_status(self):
         print(self.queues)
 
+    def register_coordinator(self, coordinator: GoalCoordinator):
+        self.coordinator = coordinator
 
-    def add_character(self, character_data: Dict[str, Any], world_state: WorldState):
+    def add_character(self, agent: CharacterAgent):
         """Add a new charcter to be handled by the scheduler."""
-        name = character_data["name"]
+        name = agent.name
         if name in self.agents: 
             return
         
         self.logger.info(f"Adding character: {name}")
-        agent = CharacterAgent(character_data, world_state, self.api_client, self)
+        
         self.agents[name] = agent
         self.queues[name] = deque()
         task = asyncio.create_task(self._worker(name))
@@ -49,7 +51,6 @@ class ActionScheduler:
             result = task.result()  # This will re-raise any exception
         except Exception as e:
             self.logger.error(f"Task raised exception: {e}", exc_info=True)
-
 
     def queue_action_node(self, character_name: str, node: ActionExecutable):
         """Queue an `node` for evaluation and execution by the character's worker."""
@@ -73,9 +74,22 @@ class ActionScheduler:
         queue = self.queues[character_name]
 
         while True:
+            self.coordinator.check_in_character(agent.char_data)
+            
             if not queue:
-                await asyncio.sleep(0.5)
-                continue
+                match agent.action_mode:
+                    case AgentMode.MANUAL:
+                        await asyncio.sleep(0.5)
+                        continue
+                   
+                    case AgentMode.AUTO_GOAL_LEADER:
+                        self.coordinator.get_next_goal(agent.char_data, "progression")
+                   
+                    case AgentMode.AUTO_GOAL_SUPPORT:
+                        self.coordinator.get_next_goal(agent.char_data, "pantry")
+                
+                    case _:
+                        raise Exception(f"Unknown Agent Mode: {agent.action_mode}")
 
             # Pop the next node and process
             node = queue.popleft()
@@ -116,7 +130,7 @@ class ActionScheduler:
         elif type(action.type) is MetaAction:
             return await self._process_single_meta_action(agent, action)  
         else:
-            raise Exception(f"Unknown instance tyoe of action: {type(action.type)}")     
+            raise Exception(f"Unknown instance type of action: {type(action.type)}")     
     
     async def _process_single_character_action(self, agent: CharacterAgent, action: Action) -> bool:
         retry_count = 0
@@ -347,13 +361,17 @@ class ActionScheduler:
                     level = expression.parameters["level"]
                     condition_met = agent.has_skill_level(skill, level)
 
+                case ActionCondition.RESOURCE_FROM_FIGHTING:
+                    resource = expression.parameters["resource"]
+                    condition_met = agent.world_state.item_from_fighting(resource)
+
                 case ActionCondition.RESOURCE_FROM_GATHERING:
                     resource = expression.parameters["resource"]
                     condition_met = agent.world_state.item_from_gathering(resource)
 
-                case ActionCondition.RESOURCE_FROM_FIGHTING:
+                case ActionCondition.RESOURCE_FROM_CRAFTING:
                     resource = expression.parameters["resource"]
-                    condition_met = agent.world_state.item_from_fighting(resource)
+                    condition_met = agent.world_state.item_from_crafting(resource)
 
                 case ActionCondition.CONTEXT_COUNTER_AT_VALUE:
                     counter_name = expression.parameters["name"]
@@ -386,3 +404,4 @@ class ActionScheduler:
                 
                 case _:
                     raise Exception(f"Unknown logical operator: {expression.operator}")
+                

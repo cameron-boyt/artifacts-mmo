@@ -4,6 +4,7 @@ import logging
 from datetime import datetime
 import re
 from typing import TYPE_CHECKING, Dict, List, Tuple, Any
+from enum import Enum, auto
 from math import floor, ceil
 
 from src.action import Action, ActionOutcome, CharacterAction
@@ -13,6 +14,11 @@ from src.helpers import SKILLS, ItemOrder, ItemType
 
 if TYPE_CHECKING:
     from src.scheduler import ActionScheduler
+
+class AgentMode(Enum):
+    MANUAL = auto()
+    AUTO_GOAL_LEADER = auto()
+    AUTO_GOAL_SUPPORT = auto()
 
 class CharacterAgent:
     """Represents a single character, holding its state and execution logic."""
@@ -35,7 +41,7 @@ class CharacterAgent:
         }
         self.world_state = world_state
 
-        self.is_autonomous: bool = False
+        self.action_mode: AgentMode = AgentMode.MANUAL
         self.abort_actions: bool = False
         self.cooldown_expires_at: float = datetime.strptime(self.char_data.get("cooldown_expiration", "1970-01-01T00:00:00.000Z"), "%Y-%m-%dT%H:%M:%S.%fZ").timestamp()
 
@@ -61,7 +67,7 @@ class CharacterAgent:
             (item["code"], self.world_state.get_heal_power_of_food(item["code"]))
             for item in self.char_data["inventory"]
             if self.world_state.is_food(item["code"]) 
-            and self.world_state.character_meets_conditions_for_item(
+            and self.world_state.character_meets_item_conditions(
                 self.char_data, 
                 self.world_state.get_item_info(item["code"])["conditions"]
             )
@@ -89,7 +95,7 @@ class CharacterAgent:
                     case ItemType.FOOD:
                         best_food = self.world_state.get_best_food_for_character_in_bank(self.char_data)
                         if best_food:
-                            item.item = best_food[0]
+                            item.item = best_food
                         else:
                             return []
 
@@ -203,6 +209,15 @@ class CharacterAgent:
     def unset_abort_actions(self):
         self.abort_actions = False
 
+    def set_mode_manual(self):
+        self.action_mode = AgentMode.MANUAL
+
+    def set_mode_leader(self):
+        self.action_mode = AgentMode.AUTO_GOAL_LEADER
+
+    def set_mode_support(self):
+        self.action_mode = AgentMode.AUTO_GOAL_SUPPORT
+
     ## Condition Checkers
     def inventory_full(self) -> bool:
         """Check if the agent's inventory is full."""
@@ -241,7 +256,7 @@ class CharacterAgent:
         usable_food = [
             item for item in self.char_data["inventory"]
             if self.world_state.is_food(item["code"]) 
-            and self.world_state.character_meets_conditions_for_item(
+            and self.world_state.character_meets_item_conditions(
                 self.char_data, 
                 self.world_state.get_item_info(item["code"])["conditions"]
             )
@@ -251,9 +266,9 @@ class CharacterAgent:
     
     def bank_contains_usable_food(self) -> bool:
         usable_food = [
-            item for item, quantity in self.world_state._bank_data.items()
+            item for item, quantity in self.world_state.get_bank_items().items()
             if self.world_state.is_food(item)
-            and self.world_state.character_meets_conditions_for_item(
+            and self.world_state.character_meets_item_conditions(
                 self.char_data, 
                 self.world_state.get_item_info(item)["conditions"]
             )
@@ -300,15 +315,27 @@ class CharacterAgent:
     # Context Updater
     def apply_context_update(self, context_update: dict):
         for k, v in context_update.items():
+            if type(v) is list:
+                context_value = self.context
+                for key in v:
+                    context_value = context_value[key]
+
+                update_value = context_value
+            else:
+                update_value = v
+                
             if re.search(r'^counter_', k):
-                if v is None:
+                if update_value is None:
                     del self.context[k]
-                elif v == 0:
+                elif update_value == 0:
                     self.context[k] = 0
                 else:
-                    self.context[k] += v
+                    if not k in self.context:
+                        raise Exception(f"Counter {k} was never initialised")
+                    
+                    self.context[k] += update_value
             else:
-                self.context[k] = v
+                self.context[k] = update_value
 
     ## Action Performance
     async def perform(self, action: Action) -> ActionOutcome:

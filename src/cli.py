@@ -11,6 +11,8 @@ from src.api import APIClient
 from src.scheduler import ActionScheduler
 from src.planner import ActionPlanner, ActionIntent, Intention
 from src.worldstate import WorldState
+from src.goalcoordinator import GoalCoordinator
+from src.character import CharacterAgent
 
 def get_token() -> str:
     with open("token.txt", 'r') as f:
@@ -27,7 +29,7 @@ async def get_bank_data(api: APIClient, query_api: bool = False) -> List[Dict[st
         bank_data = await api.get_bank(i)
         all_bank_data.extend(bank_data.get("data"))
 
-    with open('bank_data.json', 'w') as f:
+    with open('data/bank_data.json', 'w') as f:
         f.write(json.dumps(all_bank_data))
 
     return all_bank_data
@@ -42,10 +44,10 @@ async def get_item_data(api: APIClient, query_api: bool = False) -> Dict[str, Di
             item_data = await api.get_items(i)
             all_item_data.extend(item_data.get("data"))
 
-        with open('item_data.json', 'w') as f:
+        with open('data/item_data.json', 'w') as f:
             f.write(json.dumps(all_item_data))
     else:
-        with open('item_data.json', 'r') as f:
+        with open('data/item_data.json', 'r') as f:
             all_item_data = json.loads(f.read())
 
     return all_item_data
@@ -60,10 +62,10 @@ async def get_map_data(api: APIClient, query_api: bool = False) -> Dict[str, Dic
             map_data = await api.get_maps(i)
             all_map_data.extend(map_data.get("data"))
 
-        with open('map_data.json', 'w') as f:
+        with open('data/map_data.json', 'w') as f:
             f.write(json.dumps(all_map_data))
     else:
-        with open('map_data.json', 'r') as f:
+        with open('data/map_data.json', 'r') as f:
             all_map_data = json.loads(f.read())
 
     return all_map_data
@@ -78,10 +80,10 @@ async def get_resource_data(api: APIClient, query_api: bool = False) -> Dict[str
             resource_data = await api.get_resources(i)
             all_resource_data.extend(resource_data.get("data"))
 
-        with open('resource_data.json', 'w') as f:
+        with open('data/resource_data.json', 'w') as f:
             f.write(json.dumps(all_resource_data))
     else:
-        with open('resource_data.json', 'r') as f:
+        with open('data/resource_data.json', 'r') as f:
             all_resource_data = json.loads(f.read())
 
     return all_resource_data
@@ -96,10 +98,10 @@ async def get_monster_data(api: APIClient, query_api: bool = False) -> Dict[str,
             monster_data = await api.get_monsters(i)
             all_monster_data.extend(monster_data.get("data"))
 
-        with open('monster_data.json', 'w') as f:
+        with open('data/monster_data.json', 'w') as f:
             f.write(json.dumps(all_monster_data))
     else:
-        with open('monster_data.json', 'r') as f:
+        with open('data/monster_data.json', 'r') as f:
             all_monster_data = json.loads(f.read())
 
     return all_monster_data
@@ -108,14 +110,14 @@ async def get_character_data(api: APIClient) -> List[dict]:
     characters = await api.get_characters()
     character_data = characters["data"]
     
-    with open('character_data.json', 'w') as f:
+    with open('data/character_data.json', 'w') as f:
         f.write(json.dumps(character_data))
 
     return character_data
 
 async def main():
     logging.basicConfig(
-        filename="artifacts.log",
+        filename="logs/artifacts.log",
         filemode='a',
         format='%(asctime)s %(levelname)-8s- %(message)s',
         level=logging.DEBUG,
@@ -141,19 +143,26 @@ async def main():
     character_data = await get_character_data(api)
 
     world_state = WorldState(bank_data, map_data, item_data, resource_data, monster_data)
-
-    scheduler = ActionScheduler(api)
+    scheduler = ActionScheduler()
     planner = ActionPlanner(world_state)
+    coordinator = GoalCoordinator(world_state, planner, scheduler)
+
+    scheduler.register_coordinator(coordinator)
 
     for character in character_data:
-        scheduler.add_character(character, world_state)
+        agent = CharacterAgent(character, world_state, api, scheduler)
+        scheduler.add_character(agent)
 
     # Run some starting commands
     # parse_input(planner, scheduler, world_state, "Maett complete-tasks monsters")
     # parse_input(planner, scheduler, world_state, "Oscar complete-tasks monsters")
-    parse_input(planner, scheduler, world_state, "Cameron craft-or-gather copper_bar max")
+    # parse_input(planner, scheduler, world_state, "Cameron craft-or-gather copper_bar max")
     # parse_input(planner, scheduler, world_state, "Jayne gather copper_ore")
     # parse_input(planner, scheduler, world_state, "Moira gather copper_ore")
+
+    scheduler.agents["Cameron"].set_mode_leader()
+    # scheduler.agents["Moira"].set_mode_support()
+    # scheduler.agents["Jayne"].set_mode_support()
 
     while True:
         c = await asyncio.to_thread(input, "Enter Command: ")
@@ -333,9 +342,9 @@ def parse_input(planner: ActionPlanner, scheduler: ActionScheduler, world: World
 
             if re.match(r'\d+', args[1]):
                 quantity = int(args[1])
-                node = planner.plan(ActionIntent(Intention.COLLECT_THEN_CRAFT, item=item, quantity=quantity, gather_intermediaries=True))
+                node = planner.plan(ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=item, quantity=quantity, gather_intermediaries=True))
             elif re.match(r'max', args[1]):
-                node = planner.plan(ActionIntent(Intention.COLLECT_THEN_CRAFT, item=item, craft_max=True, gather_intermediaries=True))
+                node = planner.plan(ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=item, craft_max=True, gather_intermediaries=True))
             else:
                 raise Exception("Invalid quantity argument.")
             
