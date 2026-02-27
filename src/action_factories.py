@@ -5,11 +5,11 @@ from src.action import *
 def group(*actions: ActionExecutable) -> ActionGroup:
     return ActionGroup(actions=actions)
 
-def do_nothing() -> ActionGroup:
-    return group()
+def success_action() -> Action:
+    return Action(MetaAction.FORCE_SUCCESS)
 
 def fail_action() -> Action:
-    return Action(MetaAction.FAIL_OUT)
+    return Action(MetaAction.FORCE_FAIL)
 
 ## Base Action Factories
 
@@ -97,12 +97,12 @@ def prepare_best_loadout(**params) -> Action:
 def clear_prepared_loadout() -> Action:
     return Action(MetaAction.CLEAR_PREPARED_LOADOUT)
 
-# Context Counters
-def reset_context_counter(**params) -> Action:
-    return Action(MetaAction.RESET_CONTEXT_COUNTER, params=params)
+# Context Values
+def set_context(**params) -> Action:
+    return Action(MetaAction.SET_CONTEXT, params=params)
 
-def increment_context_counter(**params) -> Action:
-    return Action(MetaAction.INCREMENT_CONTEXT_COUNTER, params=params)
+def update_context(**params) -> Action:
+    return Action(MetaAction.UPDATE_CONTEXT, params=params)
 
-def clear_context_counter(**params) -> Action:
-    return Action(MetaAction.CLEAR_CONTEXT_COUNTER, params=params)
+def clear_context(**params) -> Action:
+    return Action(MetaAction.CLEAR_CONTEXT, params=params)

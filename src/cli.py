@@ -144,7 +144,7 @@ async def main():
 
     world_state = WorldState(bank_data, map_data, item_data, resource_data, monster_data)
     scheduler = ActionScheduler()
-    planner = ActionPlanner(world_state)
+    planner = ActionPlanner()
     coordinator = GoalCoordinator(world_state, planner, scheduler)
 
     scheduler.register_coordinator(coordinator)
@@ -152,17 +152,18 @@ async def main():
     for character in character_data:
         agent = CharacterAgent(character, world_state, api, scheduler)
         scheduler.add_character(agent)
+        coordinator.check_in_character(agent.char_data)
 
     # Run some starting commands
-    # parse_input(planner, scheduler, world_state, "Maett complete-tasks monsters")
-    # parse_input(planner, scheduler, world_state, "Oscar complete-tasks monsters")
+    parse_input(planner, scheduler, world_state, "Maett complete-tasks monsters")
+    parse_input(planner, scheduler, world_state, "Oscar complete-tasks monsters")
     # parse_input(planner, scheduler, world_state, "Cameron craft-or-gather copper_bar max")
     # parse_input(planner, scheduler, world_state, "Jayne gather copper_ore")
     # parse_input(planner, scheduler, world_state, "Moira gather copper_ore")
 
     scheduler.agents["Cameron"].set_mode_leader()
-    # scheduler.agents["Moira"].set_mode_support()
-    # scheduler.agents["Jayne"].set_mode_support()
+    scheduler.agents["Moira"].set_mode_support()
+    scheduler.agents["Jayne"].set_mode_support()
 
     while True:
         c = await asyncio.to_thread(input, "Enter Command: ")

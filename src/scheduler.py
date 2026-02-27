@@ -6,10 +6,11 @@ import time
 import logging
 from collections import deque
 from typing import TYPE_CHECKING, Any, Dict
+from math import ceil
 
 from src.action import *
-
 from src.character import AgentMode
+from src.planner import ContextValue, DeferredExpr
 
 if TYPE_CHECKING:
     from src.character import CharacterAgent
@@ -73,9 +74,7 @@ class ActionScheduler:
         agent = self.agents[character_name]
         queue = self.queues[character_name]
 
-        while True:
-            self.coordinator.check_in_character(agent.char_data)
-            
+        while True:            
             if not queue:
                 match agent.action_mode:
                     case AgentMode.MANUAL:
@@ -111,20 +110,28 @@ class ActionScheduler:
         
         if isinstance(node, Action):
             success = await self._process_single_action(agent, node)
+            # After every action, check in with the coordinator to update global knowledge
+            self.coordinator.check_in_character(agent.char_data)
         elif isinstance(node, ActionGroup):
             success = await self._process_group(agent, node)
         elif isinstance(node, ActionControlNode):
             success = await self._process_control_node(agent, node)
-        elif isinstance(node, DeferredAction):
-            deferred_node = node.resolver(agent)
-            success = await self._process_node(agent, deferred_node)
+        elif isinstance(node, DeferredPlanNode):
+            resolved_node = node.resolver(agent)
+            success = await self._process_node(agent, resolved_node)
         else:
             raise Exception("Unrecognised node typing.")
 
         return success
 
     async def _process_single_action(self, agent: CharacterAgent, action: Action) -> bool:
-        """Process a single action to be made by an agent, repeating as defined."""        
+        """Process a single action to be made by an agent, repeating as defined."""
+
+        # Resolve params
+        for parameter, value in action.params.items():
+            if isinstance(value, (ContextValue, DeferredExpr)):
+                action.params[parameter] = value.resolve(agent)
+
         if type(action.type) is CharacterAction:
             return await self._process_single_character_action(agent, action)
         elif type(action.type) is MetaAction:
@@ -140,7 +147,7 @@ class ActionScheduler:
             # Wait for the remaining cooldown for the worker
             remaining_cooldown = max(0, agent.cooldown_expires_at - time.time())
             if remaining_cooldown > 0:
-                self.logger.debug(f"[{agent.name}] Waiting for cooldown: {round(remaining_cooldown)}s.")
+                self.logger.debug(f"[{agent.name}] Waiting for cooldown: {ceil(remaining_cooldown)}s.")
                 await asyncio.sleep(remaining_cooldown)
 
             # Check for abort
@@ -189,22 +196,18 @@ class ActionScheduler:
             return False
         
         # Execute the action
-        context_update, outcome = await agent.world_state.perform(action)
+        outcome = await agent.meta_perform(action)
 
         # Check action result
         match outcome:
-            case ActionOutcome.SUCCESS:
-                # Apply the context update to the agent
-                if context_update:
-                    agent.apply_context_update(context_update)
-                    
+            case ActionOutcome.SUCCESS:                    
                 return True
             
             case ActionOutcome.FAIL:
                 return False
                 
             case _:
-                raise Exception(f"Unknown action outcome for CharacterAction: {outcome}")
+                raise Exception(f"Unknown action outcome for MetaAction: {outcome}")
 
     async def _process_group(self, agent: CharacterAgent, action_group: ActionGroup) -> bool:
         """Process an action group, sequencing through all child actions, repeating as defined."""                    
@@ -281,23 +284,35 @@ class ActionScheduler:
             
         return control_node.fail_path
 
-    def _evaluate_condition(self, agent: CharacterAgent, expression: ActionConditionExpression | DeferredCondition) -> bool:
+    def _evaluate_condition(self, agent: CharacterAgent, expression: ActionConditionExpression) -> bool:
         """Evaluate a condition expression path."""
         if not expression:
             return True
-        
-        if type(expression) is DeferredCondition:
-            expression = expression.resolver(agent)
            
         if expression.is_leaf():
             # If at a leaf node, evaluate the condition
             self.logger.debug(f"[{agent.name}] Evaluating condition {expression.condition}")
 
+            # Resolve params
+            for parameter, value in expression.params.items():
+                if isinstance(value, (ContextValue, DeferredExpr)):
+                    expression.params[parameter] = value.resolve(agent)
+
             condition_met = False
-            match expression.condition:
+            match expression.condition:                
                 case ActionCondition.FOREVER:
                     # Forever meaning the condition will always me bet, therefore TRUE.
                     condition_met = True
+
+                case ActionCondition.AT_LOCATION:
+                    if (x := expression.params.get("x")) and (y := expression.params.get("y")):
+                        condition_met = agent.at_location(x, y)
+                    elif world_location := expression.params.get("world_location"):
+                        condition_met = agent.at_world_location(world_location)
+                    elif monster_or_resource := expression.params.get("monster_or_resource"):
+                        condition_met = agent.at_monster_or_resource(monster_or_resource)
+                    elif workshop_for_item := expression.params.get("workshop_for_item"):
+                        condition_met = agent.at_workshop_for_item(workshop_for_item)
                 
                 case ActionCondition.INVENTORY_FULL:
                     condition_met = agent.inventory_full()
@@ -306,33 +321,62 @@ class ActionScheduler:
                     condition_met = agent.inventory_empty()
 
                 case ActionCondition.INVENTORY_HAS_AVAILABLE_SPACE:
-                    free_spaces = expression.parameters["spaces"]
+                    free_spaces = expression.params["spaces"]
                     condition_met = agent.inventory_has_available_space(free_spaces)
 
                 case ActionCondition.INVENTORY_HAS_AVAILABLE_SPACE_FOR_ITEMS:
-                    items = expression.parameters["items"]
+                    items = expression.params["items"]
                     needed_space = 0
                     for item in items:
                         needed_quantity = item["quantity"]
-                        current_quantity = agent.get_quantity_of_item_in_inventory(item["code"])
+                        current_quantity = agent.get_quantity_of_item_available(item["code"], in_inv=True)
                         needed_space += needed_quantity - current_quantity
 
                     condition_met = agent.inventory_has_available_space(needed_space)
                 
                 case ActionCondition.INVENTORY_HAS_ITEM_OF_QUANTITY:
-                    item = expression.parameters["item"]
-                    quantity = expression.parameters["quantity"]
-                    condition_met = agent.inventory_has_item_of_quantity(item, quantity)
+                    item = expression.params["item"]
+                    quantity = expression.params["quantity"]
+                    condition_met = agent.has_quantity_of_item_available(item, quantity, in_inv=True)
                 
                 case ActionCondition.BANK_HAS_ITEM_OF_QUANTITY:
-                    item = expression.parameters["item"]
-                    quantity = expression.parameters["quantity"]
-                    condition_met = agent.bank_has_item_of_quantity(item, quantity)
+                    item = expression.params["item"]
+                    quantity = expression.params["quantity"]
+                    condition_met = agent.has_quantity_of_item_available(item, quantity, in_bank=True)
 
                 case ActionCondition.BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY:
-                    item = expression.parameters["item"]
-                    quantity = expression.parameters["quantity"]
-                    condition_met = agent.bank_and_inventory_have_item_of_quantity(item, quantity)
+                    item = expression.params["item"]
+                    quantity = expression.params["quantity"]
+                    condition_met = agent.has_quantity_of_item_available(item, quantity, in_inv=True, in_bank=True)
+                
+                case ActionCondition.GLOBAL_AVAILABLE_QUANTIY_OF_ITEM:
+                    item = expression.params["item"]
+                    quantity = expression.params["quantity"]
+                    condition_met = self.coordinator.get_amount_of_item_in_world(item) >= quantity
+
+                case ActionCondition.CRAFT_INGREDIENTS_IN_INV:
+                    item = expression.params["item"]
+                    quantity = expression.params["quantity"]
+                    condition_met = agent.crafting_materials_for_item_available(item, quantity, in_inv=True)
+
+                case ActionCondition.CRAFT_INGREDIENTS_IN_BANK:
+                    item = expression.params["item"]
+                    quantity = expression.params["quantity"]
+                    condition_met = agent.crafting_materials_for_item_available(item, quantity, in_bank=True)
+
+                case ActionCondition.CRAFT_INGREDIENTS_IN_BANK_OR_INV:
+                    item = expression.params["item"]
+                    quantity = expression.params["quantity"]
+                    condition_met = agent.crafting_materials_for_item_available(item, quantity, in_inv=True, in_bank=True)
+
+                case ActionCondition.PREPARED_LOADOUT_HAS_ITEMS:
+                    condition_met = agent.loadout_contains_items()
+
+                case ActionCondition.PREPARED_LOADOUT_DIFFERS_FROM_EQUIPPED:
+                    condition_met = agent.loadout_differs_from_equipped()
+
+                case ActionCondition.ITEMS_IN_EQUIP_QUEUE:
+                    condition_met = agent.items_in_equip_queue()
                     
                 case ActionCondition.INVENTORY_CONTAINS_USABLE_FOOD:
                     condition_met = agent.inventory_contains_usable_food()
@@ -343,50 +387,47 @@ class ActionScheduler:
                 case ActionCondition.HEALTH_LOW_ENOUGH_TO_EAT:
                     condition_met = agent.health_sufficiently_low_to_heal()
 
-                case ActionCondition.ITEMS_IN_EQUIP_QUEUE:
-                    condition_met = agent.items_in_equip_queue()
-
                 case ActionCondition.HAS_TASK:
                     condition_met = agent.has_task()
 
                 case ActionCondition.HAS_TASK_OF_TYPE:
-                    task_type = expression.parameters["task_type"]
+                    task_type = expression.params["task_type"]
                     condition_met = agent.has_task_of_type(task_type)
 
                 case ActionCondition.TASK_COMPLETE:
                     condition_met = agent.has_completed_task()
 
                 case ActionCondition.HAS_SKILL_LEVEL:
-                    skill = expression.parameters["skill"]
-                    level = expression.parameters["level"]
+                    skill = expression.params["skill"]
+                    level = expression.params["level"]
                     condition_met = agent.has_skill_level(skill, level)
 
                 case ActionCondition.RESOURCE_FROM_FIGHTING:
-                    resource = expression.parameters["resource"]
+                    resource = expression.params["resource"]
                     condition_met = agent.world_state.item_from_fighting(resource)
 
                 case ActionCondition.RESOURCE_FROM_GATHERING:
-                    resource = expression.parameters["resource"]
+                    resource = expression.params["resource"]
                     condition_met = agent.world_state.item_from_gathering(resource)
 
                 case ActionCondition.RESOURCE_FROM_CRAFTING:
-                    resource = expression.parameters["resource"]
+                    resource = expression.params["resource"]
                     condition_met = agent.world_state.item_from_crafting(resource)
 
-                case ActionCondition.CONTEXT_COUNTER_AT_VALUE:
-                    counter_name = expression.parameters["name"]
-                    counter_value = expression.parameters["value"]
-                    condition_met = agent.counter_at_value(counter_name, counter_value)
+                case ActionCondition.CONTEXT_VALUE_EQUALS:
+                    key = expression.params["key"]
+                    value = expression.params["value"]
+                    condition_met = agent.context_value_equals(key, value)
 
                 case _:
                     raise NotImplementedError()
                 
             if condition_met:
-                self.logger.debug(f"[{agent.name}] Passed {expression.condition} with parameters {expression.parameters}.")
+                self.logger.debug(f"[{agent.name}] Passed {expression.condition} with params {expression.params}.")
             else:
                 # Exception case where a 'failure' is due to a FOREVER condition
                 if expression.condition != ActionCondition.FOREVER:
-                    self.logger.debug(f"[{agent.name}] Failed {expression.condition} with parameters {expression.parameters}.")
+                    self.logger.debug(f"[{agent.name}] Failed {expression.condition} with params {expression.params}.")
 
             return condition_met
         else:

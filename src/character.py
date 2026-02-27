@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
+import time
 import re
-from typing import TYPE_CHECKING, Dict, List, Tuple, Any
+from typing import TYPE_CHECKING, Dict, List, Tuple, Any, Callable
 from enum import Enum, auto
 from math import floor, ceil
 
-from src.action import Action, ActionOutcome, CharacterAction
+from src.action import Action, MetaAction, ActionOutcome, CharacterAction
 from src.api import APIClient, RequestOutcome, RequestOutcomeDetail
 from src.worldstate import WorldState
 from src.helpers import SKILLS, ItemOrder, ItemType
@@ -189,13 +191,16 @@ class CharacterAgent:
     def get_free_inventory_spaces(self) -> int:
         return self.get_inventory_size() - self.get_number_of_items_in_inventory()
 
-    def get_quantity_of_item_in_inventory(self, item: str) -> int:
+    def _get_quantity_of_item_in_inventory(self, item: str) -> int:
         """Get the quantity of an item in the agent's inventory."""
         for item_data in self.char_data["inventory"]:
             if item_data["code"] == item:
                 return item_data["quantity"]
 
         return 0
+    
+    def get_max_batch_size_for_item(self, item: str) -> int:
+        return self.world_state.get_max_batch_size_for_item(item, self.get_inventory_size())
     
     def get_task_target(self) -> str:
         return self.char_data["task"]
@@ -218,7 +223,47 @@ class CharacterAgent:
     def set_mode_support(self):
         self.action_mode = AgentMode.AUTO_GOAL_SUPPORT
 
+    def get_quantity_of_item_available(self, item: str, in_inv=False, in_bank=False) -> bool:
+        """Check if the agent's has an item of at least a specific quantity available via inv, bank, or both."""
+        available_quantity = 0
+
+        if in_inv:
+            available_quantity += self._get_quantity_of_item_in_inventory(item)
+
+        if in_bank:
+            available_quantity += self.world_state.get_amount_of_item_in_bank(item)
+
+        return available_quantity
+
     ## Condition Checkers
+    def at_location(self, x: int, y: int) -> bool:
+        return self.char_data["x"] == x and self.char_data["y"] == y
+
+    def at_world_location(self, world_location: str) -> bool:
+        locations = self.world_state.get_locations_of_world_location(world_location)
+        for (x, y) in locations:
+            if self.char_data["x"] == x and self.char_data["y"] == y:
+                return True
+        
+        return False
+    
+    def at_monster_or_resource(self, monster_or_resource: str) -> bool:
+        locations = self.world_state.get_locations_of_monster_or_resource(monster_or_resource)
+        for (x, y) in locations:
+            if self.char_data["x"] == x and self.char_data["y"] == y:
+                return True
+        
+        return False
+                    
+    def at_workshop_for_item(self, workshop_for_item: str) -> bool:
+        workshop = self.world_state.get_workshop_for_item(workshop_for_item)
+        locations = self.world_state.get_workshop_locations(workshop)
+        for (x, y) in locations:
+            if self.char_data["x"] == x and self.char_data["y"] == y:
+                return True
+        
+        return False
+
     def inventory_full(self) -> bool:
         """Check if the agent's inventory is full."""
         item_count = self.get_number_of_items_in_inventory()
@@ -236,21 +281,46 @@ class CharacterAgent:
         inv_size = self.get_inventory_size()
         return inv_size - item_count >= spaces
     
-    def inventory_has_item_of_quantity(self, item: str, quantity: int) -> bool:
-        """Check if the agent's inventory has an item of at least a specific quantity."""
-        inv_quantity = self.get_quantity_of_item_in_inventory(item)
-        return inv_quantity >= quantity
-
-    def bank_has_item_of_quantity(self, item: str, quantity: int) -> bool:
-        """Check if the agent's bank has an item of at least a specific quantity."""
-        bank_quantity = self.world_state.get_amount_of_item_in_bank(item)
-        return bank_quantity >= quantity
+    def has_quantity_of_item_available(self, item: str, quantity: int, in_inv=False, in_bank=False) -> bool:
+        """Check if the agent's has an item of at least a specific quantity available via inv, bank, or both."""
+        available_quantity = self.get_quantity_of_item_available(item, in_inv=in_inv, in_bank=in_bank)
+        return available_quantity >= quantity
     
-    def bank_and_inventory_have_item_of_quantity(self, item: str, quantity: int) -> bool:
-        """Check if the agent's bank and inventory have a combined amount of an item of at least a specific quantity."""
-        inv_quantity = self.get_quantity_of_item_in_inventory(item)
-        bank_quantity = self.world_state.get_amount_of_item_in_bank(item)
-        return inv_quantity + bank_quantity >= quantity
+    def crafting_materials_for_item_available(self, item: str, quantity: int, in_inv=False, in_bank=False) -> bool:
+        materials = self.world_state.get_crafting_materials_for_item(item, quantity)
+        for material in materials:
+            quantity_available = self.has_quantity_of_item_available(material["code"], material["quantity"], in_inv, in_bank)
+            if not quantity_available:
+                return False
+            
+        return True
+    
+    def loadout_contains_items(self) -> bool:
+        if "prepared_loadout" in self.context:
+            return len(self.context["prepared_loadout"]) > 0
+        else:
+            return False 
+
+    def loadout_differs_from_equipped(self) -> bool:
+        loadout = self.context["prepared_loadout"]
+        for item in loadout:
+            if self.world_state.is_equipment(item["code"]):
+                slot = self.world_state.get_equip_slot_for_item(item["code"])
+                if slot == "ring" and (self.char_data["ring1_slot"] != item["code"] or self.char_data["ring2_slot"] != item["code"]):
+                    return True
+                elif self.char_data[f"{slot}_slot"] != item["code"]:
+                    return True
+                else:
+                    raise Exception("We shouldn't get here.")
+            else:
+                if self._get_quantity_of_item_in_inventory(item["code"]) < item["quantity"]:
+                    return True
+                
+        return False
+    
+    def items_in_equip_queue(self) -> bool:
+        equip_queue = self.context.get("equip_queue", [])
+        return len(equip_queue) > 0
     
     def inventory_contains_usable_food(self) -> bool:
         usable_food = [
@@ -297,10 +367,6 @@ class CharacterAgent:
     def has_completed_task(self) -> bool:
         return self.char_data["task_progress"] == self.char_data["task_total"]
     
-    def items_in_equip_queue(self) -> bool:
-        equip_queue = self.context.get("equip_queue", [])
-        return len(equip_queue) > 0
-    
     def has_skill_level(self, skill: str, level: int) -> bool:
         if skill in SKILLS:
             return self.char_data[f"{skill}_level"] >= level
@@ -309,35 +375,89 @@ class CharacterAgent:
         else:
             raise Exception(f"Unknown skill: {skill}.")
         
-    def counter_at_value(self, name: str, value: int) -> bool:
-        return self.context[name] >= value
-        
-    # Context Updater
-    def apply_context_update(self, context_update: dict):
-        for k, v in context_update.items():
-            if type(v) is list:
-                context_value = self.context
-                for key in v:
-                    context_value = context_value[key]
+    def context_value_equals(self, key: str, value: Any) -> bool:
+        return self.context[key] == value
 
-                update_value = context_value
-            else:
-                update_value = v
-                
-            if re.search(r'^counter_', k):
-                if update_value is None:
-                    del self.context[k]
-                elif update_value == 0:
-                    self.context[k] = 0
-                else:
-                    if not k in self.context:
-                        raise Exception(f"Counter {k} was never initialised")
-                    
-                    self.context[k] += update_value
-            else:
-                self.context[k] = update_value
+    ## Action Performance        
+    async def meta_perform(self, action: Action) -> ActionOutcome:
+        log_msg = f"[{self.name}] Performing meta action: {action.type.value}"
+        if action.params:
+            log_msg += f" with params {action.params}"
+        self.logger.debug(log_msg)
 
-    ## Action Performance
+        match action.type:
+            case MetaAction.FORCE_SUCCESS:
+                return ActionOutcome.SUCCESS
+            
+            case MetaAction.FORCE_FAIL:
+                return ActionOutcome.FAIL
+
+            case MetaAction.SET_CONTEXT:
+                key = action.params.get("key")
+                value = action.params.get("value")
+                self.context[key] = value
+                return ActionOutcome.SUCCESS
+            
+            case MetaAction.UPDATE_CONTEXT:
+                key = action.params.get("key")
+                value = action.params.get("value")                    
+                self.context[key] += value
+                return ActionOutcome.SUCCESS
+            
+            case MetaAction.CLEAR_CONTEXT:
+                key = action.params.get("key")
+                del self.context[key]
+                return ActionOutcome.SUCCESS
+            
+            case MetaAction.CREATE_ITEM_RESERVATION:
+                items = action.params.get("items")
+
+                for item in items:
+                    self.world_state.set_bank_reservation(self.name, item["code"], item["quantity"])
+
+                return ActionOutcome.SUCCESS
+
+            case MetaAction.UPDATE_ITEM_RESERVATION:
+                items = action.params.get("items")
+
+                for item in items:
+                    self.world_state.update_bank_reservation(self.name, item["code"], item["quantity"])
+
+                return ActionOutcome.SUCCESS
+
+            case MetaAction.CLEAR_ITEM_RESERVATION:
+                items = action.params.get("items")
+
+                for item in items:
+                    if type(item) is dict:
+                        item_to_clear = item["code"]
+                    else:
+                        item_to_clear = item
+
+                    self.world_state.clear_bank_reservation(self.name, item_to_clear)
+
+                return ActionOutcome.SUCCESS
+            
+            case MetaAction.PREPARE_LOADOUT:
+                task = action.params.get("task")
+                target = action.params.get("target")
+
+                equipment, inventory, equip_queue = self.world_state.prepare_best_loadout_for_task(self.char_data, task, target)
+                self.context["prepared_loadout"] = [*equipment, *inventory]
+                self.context["prepared_loadout_inventory"] = [item["code"] for item in inventory]
+                self.context["equip_queue"] = equip_queue
+
+                return ActionOutcome.SUCCESS
+            
+            case MetaAction.CLEAR_PREPARED_LOADOUT:
+                del self.context["prepared_loadout"]
+                del self.context["prepared_loadout_inventory"]
+                del self.context["equip_queue"]
+                return ActionOutcome.SUCCESS
+
+            case _:
+                raise Exception(f"[{self.name}] Unknown meta action type: {action.type}")
+            
     async def perform(self, action: Action) -> ActionOutcome:
         log_msg = f"[{self.name}] Performing action: {action.type.value}"
         if action.params:
@@ -350,6 +470,28 @@ class CharacterAgent:
                 if action.params.get("previous", False):
                     x, y = self.context.get("previous_location")
                 elif locations := action.params.get("closest_of", []):
+                    loc = self._get_closest_location(locations)
+                    if not loc:
+                        return ActionOutcome.FAIL
+                    
+                    x, y = loc
+                elif world_location := action.params.get("world_location"):
+                    locations = self.world_state.get_locations_of_world_location(world_location)                        
+                    loc = self._get_closest_location(locations)
+                    if not loc:
+                        return ActionOutcome.FAIL
+                    
+                    x, y = loc
+                elif monster_or_resource := action.params.get("monster_or_resource"):
+                    locations = self.world_state.get_locations_of_monster_or_resource(monster_or_resource)                        
+                    loc = self._get_closest_location(locations)
+                    if not loc:
+                        return ActionOutcome.FAIL
+                    
+                    x, y = loc
+                elif workshop_for_item := action.params.get("workshop_for_item"):
+                    workshop = self.world_state.get_workshop_for_item(workshop_for_item)
+                    locations = self.world_state.get_workshop_locations(workshop)
                     loc = self._get_closest_location(locations)
                     if not loc:
                         return ActionOutcome.FAIL
@@ -400,7 +542,7 @@ class CharacterAgent:
             ## BANKING ##
             case CharacterAction.BANK_DEPOSIT_ITEM:
                 if action.params.get("deposit_all", False):
-                    exclusions = self.context["bank_deposit_exclusions"]
+                    exclusions = self.context.get("bank_deposit_exclusions", [])
                     items_to_deposit = [{ "code": item["code"], "quantity": item["quantity"] } for item in self.char_data["inventory"] if item["code"] != '' and item["code"] not in exclusions]
                     
                     if not items_to_deposit:
@@ -528,11 +670,11 @@ class CharacterAgent:
 
             # Check for trade data
             if trade_data := api_result.response.get("data", {}).get("trade"):
-                self.context["last_trade"] = trade_data
+                self.context["last_trade_quantity"] = trade_data.get("quantity")
 
             # Check for craft data
             if craft_data := api_result.response.get("data", {}).get("details", {}).get("items"):
-                self.context["last_craft"] = craft_data[0]
+                self.context["last_craft_quantity"] = craft_data[0].get("quantity")
 
             # Update character state
             if new_char_data := api_result.response.get("data", {}).get("character"):

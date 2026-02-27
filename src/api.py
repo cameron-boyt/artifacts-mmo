@@ -7,24 +7,27 @@ import json
 from typing import List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum, auto
+from datetime import datetime
+from math import ceil
 
 class RequestOutcome(Enum):
     SUCCESS = auto()
     FAIL = auto()
 
 class RequestOutcomeDetail(Enum):
-    OK = auto()
-    NOT_FOUND = auto()
-    INVALID_PAYLOAD = auto()
-    MISSING_REQUIRED_ITEMS = auto()
-    ALREADY_AT_DESTINATION = auto()
-    NO_TASK = auto()
-    ALREADY_HAS_TASK = auto()
-    LEVEL_TOO_LOW = auto()
-    CONDITIONS_NOT_MET = auto()
-    INVENTORY_FULL = auto()
-    ON_COOLDOWN = auto()
-    NO_INTERACTION = auto()
+    OK = 200
+    NOT_FOUND = 404
+    INVALID_PAYLOAD = 422
+    MISSING_REQUIRED_ITEMS = 478
+    NO_TASK = 487
+    ALREADY_HAS_TASK = 489
+    ALREADY_AT_DESTINATION = 490
+    LEVEL_TOO_LOW = 493
+    CONDITIONS_NOT_MET = 496
+    INVENTORY_FULL = 497
+    ON_COOLDOWN = 499
+    BAD_GATEWAY = 502
+    NO_INTERACTION = 598
 
 @dataclass 
 class APIResult:
@@ -39,7 +42,9 @@ class APIClient:
 
         self._base_url = base_url
         self._headers = {"Authorization": f"Bearer {api_key}"}
-        self._client = httpx.AsyncClient(base_url=self._base_url, headers=self._headers)
+        self._client = httpx.AsyncClient(base_url=self._base_url, headers=self._headers, timeout=httpx.Timeout(15.0))
+
+        self.request_history = []
 
     ## Get Character/Player Data
     async def get_characters(self) -> dict:
@@ -80,24 +85,47 @@ class APIClient:
 
     ## API General Requests for Characters
     async def try_request(self, url: str, payload: Any | None = None) -> APIResult:
-        for i in range(1, 4):
+        max_attempts = 5
+        for i in range(1, max_attempts + 1):
+            # Check against the rate limits
+            await self._check_rate_limits(url)
+
             try:
                 if payload:
-                    response = await self._client.post(url, json=payload)
+                    response = await self._client.post(url, json=payload, timeout=httpx.Timeout(60.0, connect=10.0))
                 else:
-                    response = await self._client.post(url)
-            except httpx.ReadTimeout:
-                self.logger.warning(f"Request timed out for '{url}', attempt {i} of 3.")
-                await asyncio.sleep(5 * i)
-                continue
-            except httpx.ConnectTimeout:
-                self.logger.warning(f"Request timed out for '{url}', attempt {i} of 3.")
+                    response = await self._client.post(url, timeout=httpx.Timeout(60.0, connect=10.0))
+            except Exception as e:
+                self.logger.debug(e)
+                self.logger.warning(f"Request timed out for '{url}', attempt {i} of {max_attempts}.")
                 await asyncio.sleep(5 * i)
                 continue
 
             break
 
         return await self.handle_status(response)
+    
+    async def _check_rate_limits(self, url: str):
+        if "action" in url:
+            endpoint = "action"
+        else:
+            endpoint = "data"
+
+        self.request_history.append({ "timestamp": datetime.now().timestamp(), "endpoint": endpoint })
+
+        match endpoint:
+            case "action":
+                requests_in_last_2_seconds = [
+                    req 
+                    for req in self.request_history 
+                    if req["endpoint"] == endpoint 
+                    and req["timestamp"] >= datetime.now().timestamp() - 7
+                ]
+
+                if len(requests_in_last_2_seconds) >= 7:
+                    sleep_duration = ceil(7 - (datetime.now().timestamp() - requests_in_last_2_seconds[0]["timestamp"]))
+                    self.logger.warning(f"Hit the actions rate limits, waiting for {sleep_duration}s")
+                    await asyncio.sleep(sleep_duration)
 
     async def move(self, character_name: str, x: int, y: int) -> APIResult:
         return await self.try_request(f"/my/{character_name}/action/move", { "x": x, "y": y })
@@ -252,6 +280,12 @@ class APIClient:
                 self.logger.warning("Character is on cooldown.")
                 outcome = RequestOutcome.FAIL
                 detail = RequestOutcomeDetail.ON_COOLDOWN
+
+            case 502:
+                # Bad gateway
+                self.logger.error("Bad gateway.")
+                outcome = RequestOutcome.FAIL
+                detail = RequestOutcomeDetail.BAD_GATEWAY
 
             case 598:
                 # No resource/monster on map

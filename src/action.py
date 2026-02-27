@@ -31,23 +31,49 @@ class CharacterAction(Enum):
     TASK_EXCHANGE = "Task Exchange"
     TASK_TRADE = "Task Trade"
 
+class MetaAction(Enum):
+    FORCE_SUCCESS = "Force Succes"
+    FORCE_FAIL = "Force Fail"
+
+    SET_CONTEXT = "Set Context"
+    UPDATE_CONTEXT = "Update Context"
+    CLEAR_CONTEXT = "Clear Context"
+
+    PREPARE_LOADOUT = "Prepare Loadout"
+    CLEAR_PREPARED_LOADOUT = "Clear Prepped Loadout"
+
+    CREATE_ITEM_RESERVATION = "Create Item Resevation"
+    UPDATE_ITEM_RESERVATION = "Update Item Resevation"
+    CLEAR_ITEM_RESERVATION = "Clear Item Resevation"
+
 class ActionCondition(Enum):
     NONE = auto()
     FOREVER = auto()
+    
+    AT_LOCATION = auto()
     
     INVENTORY_FULL = auto()
     INVENTORY_EMPTY = auto()
     INVENTORY_HAS_AVAILABLE_SPACE = auto()
     INVENTORY_HAS_AVAILABLE_SPACE_FOR_ITEMS = auto()
+
     BANK_HAS_ITEM_OF_QUANTITY = auto()
     INVENTORY_HAS_ITEM_OF_QUANTITY = auto()
     BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY = auto()
 
+    GLOBAL_AVAILABLE_QUANTIY_OF_ITEM = auto()
+
+    CRAFT_INGREDIENTS_IN_INV = auto()
+    CRAFT_INGREDIENTS_IN_BANK = auto()
+    CRAFT_INGREDIENTS_IN_BANK_OR_INV = auto()
+
+    PREPARED_LOADOUT_HAS_ITEMS = auto()
+    PREPARED_LOADOUT_DIFFERS_FROM_EQUIPPED = auto()
+    ITEMS_IN_EQUIP_QUEUE = auto()
+
     INVENTORY_CONTAINS_USABLE_FOOD = auto()
     BANK_CONTAINS_USABLE_FOOD = auto()
     HEALTH_LOW_ENOUGH_TO_EAT = auto()
-
-    ITEMS_IN_EQUIP_QUEUE = auto()
 
     RESOURCE_FROM_FIGHTING = auto()
     RESOURCE_FROM_GATHERING = auto()
@@ -58,7 +84,7 @@ class ActionCondition(Enum):
     TASK_COMPLETE = auto()
     HAS_SKILL_LEVEL = auto()
 
-    CONTEXT_COUNTER_AT_VALUE = auto()
+    CONTEXT_VALUE_EQUALS = auto()
 
 class ActionOutcome(Enum):
     SUCCESS = auto()
@@ -78,34 +104,18 @@ class ControlOperator(Enum):
     DO_WHILE = auto()
     TRY = auto()
 
-type ActionExecutable = Action | ActionGroup | ActionControlNode | DeferredAction
-
-class MetaAction(Enum):
-    CREATE_ITEM_RESERVATION = auto()
-    UPDATE_ITEM_RESERVATION = auto()
-    CLEAR_ITEM_RESERVATION = auto()
-
-    PREPARE_LOADOUT = auto()
-    CLEAR_PREPARED_LOADOUT = auto()
-
-    RESET_CONTEXT_COUNTER = auto()
-    INCREMENT_CONTEXT_COUNTER = auto()
-    CLEAR_CONTEXT_COUNTER = auto()
-
-    FAIL_OUT = auto()
-
-@dataclass
+@dataclass(frozen=True)
 class Action:
     """A command to be executed."""
     type: CharacterAction | MetaAction
     params: Dict[str, Any] = field(default_factory=dict)
 
-@dataclass
+@dataclass(frozen=True)
 class ActionGroup:
     """A group or sequence of actions to be completed."""
     actions: List[ActionExecutable] = field(default_factory=list)
 
-@dataclass
+@dataclass(frozen=True)
 class ActionControlNode:
     """A sequencing control node determinine action flow such as conditions or repetition."""
     control_operator: ControlOperator
@@ -154,15 +164,17 @@ class ActionControlNode:
             assert(self.condition is None)
 
 @dataclass
-class DeferredAction:
-    resolver: Callable[["CharacterAgent"], ActionExecutable]
+class DeferredPlanNode:
+    resolver: Callable[[CharacterAgent], ActionExecutable]
+
+type ActionExecutable = Action | ActionGroup | ActionControlNode | DeferredPlanNode
 
 @dataclass(frozen=True)
 class ActionConditionExpression:
     """A condition or set of conditions subject to logical operations."""
     operator: LogicalOperator | None = None
     condition: ActionCondition | None = None
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    params: Dict[str, Any] = field(default_factory=dict)
     children: List["ActionConditionExpression"] = field(default_factory=list)
 
     def __post_init__(self):
@@ -184,7 +196,4 @@ class ActionConditionExpression:
 
     def is_leaf(self) -> bool:
         return self.condition is not None
-
-@dataclass(frozen=True)
-class DeferredCondition:
-    resolver: Callable[["CharacterAgent"], ActionConditionExpression]
+  

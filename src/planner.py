@@ -9,23 +9,27 @@ from src.action import *
 from src.condition_factories import *
 from src.control_factories import *
 from src.action_factories import *
-from src.worldstate import WorldState
 from src.helpers import *
+
+@dataclass(frozen=True)
+class ContextValue:
+    key: str
+    def resolve(self, agent: CharacterAgent):
+        return agent.context[self.key]
+
+@dataclass(frozen=True)
+class DeferredExpr:
+    expr: Callable[[CharacterAgent], Any]
+    def resolve(self, agent: CharacterAgent):
+        return self.expr(agent)
 
 class Intention(Enum):
     # Basic Intention
     MOVE = auto()
     TRANSITION = auto()
 
-    FIGHT = auto()
-    REST = auto()
-    
-    GATHER = auto()
-    CRAFT = auto()
-
-    EQUIP = auto()
-    UNEQUIP = auto()
-    USE = auto()
+    FIGHT_AND_HEAL = auto()
+    CRAFT_AT_STATION = auto()
 
     WITHDRAW_ITEMS = auto()
     DEPOSIT_ITEMS = auto()
@@ -49,9 +53,7 @@ class Intention(Enum):
 
     # Complex Intentions
     COLLECT_THEN_CRAFT = auto()
-
     DEPOSIT_ALL_AT_BANK = auto()
-    BANK_THEN_RETURN = auto()
 
     # Crafting Intentions
     CRAFT_OR_GATHER_INTERMEDIARIES = auto()
@@ -59,7 +61,6 @@ class Intention(Enum):
 
     CRAFT_UNTIL_LEVEL = auto()
 
-@dataclass
 class ActionIntent:
     intention: Intention
     params: Dict[str, Any]
@@ -72,10 +73,8 @@ class ActionIntent:
 
 class ActionPlanner:
     """Interprets action intent and generates action plans."""
-    def __init__(self, world_state: WorldState):
+    def __init__(self):
         self.logger = logging.getLogger(__name__)
-
-        self.world_state = world_state
 
     def plan(self, intent: ActionIntent) -> ActionExecutable:
         match intent.intention:
@@ -86,9 +85,9 @@ class ActionPlanner:
             case Intention.TRANSITION:
                 raise NotImplementedError()
             
-            case Intention.FIGHT:                
+            case Intention.FIGHT_AND_HEAL:                
                 return group(
-                    DO_WHILE(
+                    WHILE(
                         IF(
                             (
                                 cond(ActionCondition.INVENTORY_CONTAINS_USABLE_FOOD),
@@ -100,109 +99,84 @@ class ActionPlanner:
                     ),
                     fight()
                 )
-
-            case Intention.REST:
-                return rest()
             
-            case Intention.GATHER:
-                return gather()
-            
-            case Intention.CRAFT:
-                item: str = intent.params.get("item")
-                quantity: int = intent.params.get("quantity")
-                skill_workshop = self.world_state.get_workshop_for_item(item)
-                workshop_locations = self.world_state.get_workshop_locations(skill_workshop)
+            case Intention.CRAFT_AT_STATION:
+                item = intent.params.get("item")
+                quantity = intent.params.get("quantity")
 
                 return group(
-                    move(closest_of=workshop_locations),
+                    IF(
+                        (
+                            NOT(cond(ActionCondition.AT_LOCATION, workshop_for_item=item)),
+                            move(workshop_for_item=item)
+                        )
+                    ),
                     craft(item=item, quantity=quantity)
                 )
             
-            case Intention.EQUIP:
-                return equip()
-            
-            case Intention.UNEQUIP:
-                return unequip()
-            
-            case Intention.USE:
-                raise NotImplementedError()
-            
-            case Intention.WITHDRAW_ITEMS:
-                items: ItemOrder = intent.params.get("items")
-                bank_locations = self.world_state.get_bank_locations()
-
-                return group(
-                    move(closest_of=bank_locations),
-                    bank_withdraw_item(items=items)
-                )
-            
-            case Intention.DEPOSIT_ITEMS:
-                bank_locations = self.world_state.get_bank_locations()
-                match intent.params.get("preset", "none"):
-                    case "all":
-                        return group(
-                            move(closest_of=bank_locations),
-                            bank_deposit_item(preset="all")
-                        )
-                    
-                    case _:
-                        items: List[ItemSelection] = intent.params.get("items")
-                        return group(
-                            move(closest_of=bank_locations),
-                            bank_deposit_item(items=items)
-                        )
-                    
-            case Intention.DEPOSIT_ALL_AT_BANK:
-                bank_locations = self.world_state.get_bank_locations()
-                return group(
-                    move(closest_of=bank_locations),
-                    bank_all_items()
-                )
-            
-            case Intention.WITHDRAW_GOLD:
-                bank_locations = self.world_state.get_bank_locations()
-                quantity: int = intent.params.get("quantity")
-                return group(
-                    move(closest_of=bank_locations),
-                    bank_withdraw_gold(quantity=quantity)
-                )
-            
-            case Intention.DEPOSIT_GOLD:
-                bank_locations = self.world_state.get_bank_locations()
-                quantity: int = intent.params.get("quantity")
-                return group(
-                    move(closest_of=bank_locations),
-                    bank_deposit_gold(quantity=quantity)
-                )
-            
             # General Worker Intentions
+            case Intention.DEPOSIT_ALL_AT_BANK:
+                return group(
+                    IF(
+                        (
+                            NOT(cond(ActionCondition.AT_LOCATION, world_location="bank")),
+                            move(world_location="bank")
+                        )
+                    ),
+                    IF(
+                        (
+                            NOT(cond(ActionCondition.INVENTORY_EMPTY)),
+                            bank_all_items()
+                        )
+                    )
+                )
+
             case Intention.PREPARE_FOR_TASK:
                 task_type = intent.params.get("task_type")
                 target = intent.params.get("target")
-
-                if task_type == "fighting":
-                    locations = self.world_state.get_locations_of_monster(target)
-                elif task_type == "gathering":
-                    locations = self.world_state.get_locations_of_resource(target)
-                else:
+                
+                if task_type != "fighting" and task_type != "gathering":
                     raise Exception(f"Unknown task type for prepare for: {task_type}")
 
                 return group(
-                    self.plan(ActionIntent(Intention.DEPOSIT_ALL_AT_BANK)),
-                    DeferredAction(lambda agent: prepare_best_loadout(character=agent.char_data, task=task_type, target=target)),
-                    DeferredAction(lambda agent: add_item_reservations(name=agent.name, items=agent.context["prepared_loadout"])),
-                    TRY(
-                        group(
-                            DeferredAction(lambda agent: bank_withdraw_item(items=agent.context["prepared_loadout"])),
-                            WHILE(
-                                equip(use_queue=True),
-                                condition=cond(ActionCondition.ITEMS_IN_EQUIP_QUEUE)
+                    prepare_best_loadout(task=task_type, target=target),
+                    IF(
+                        (
+                            OR(
+                                cond(ActionCondition.INVENTORY_FULL),
+                                AND(
+                                    cond(ActionCondition.PREPARED_LOADOUT_HAS_ITEMS),
+                                    cond(ActionCondition.PREPARED_LOADOUT_DIFFERS_FROM_EQUIPPED)
+                                )
                             ),
-                            bank_all_items(),
-                            move(closest_of=locations)
+                            group(
+                                self.plan(ActionIntent(Intention.DEPOSIT_ALL_AT_BANK)),
+                                add_item_reservations(items=ContextValue("prepared_loadout")),
+                                set_context(key="bank_deposit_exclusions", value=ContextValue("prepared_loadout_inventory")),
+                                TRY(
+                                    group(
+                                        bank_withdraw_item(items=ContextValue("prepared_loadout")),
+                                        WHILE(
+                                            equip(use_queue=True),
+                                            condition=cond(ActionCondition.ITEMS_IN_EQUIP_QUEUE)
+                                        )
+                                    ),
+                                    finally_path=group(
+                                        clear_item_reservations(items=ContextValue("prepared_loadout")),
+                                        clear_prepared_loadout()
+                                    )
+                                ),
+                                self.plan(ActionIntent(Intention.DEPOSIT_ALL_AT_BANK)),
+                                clear_context(key="bank_deposit_exclusions"),
+                            )
                         ),
-                        error_path=clear_prepared_loadout(),
-                        finally_path=DeferredAction(lambda agent: clear_item_reservations(name=agent.name, items=[i["code"]for i in agent.context["prepared_loadout"]]))
+                        fail_path=clear_prepared_loadout()
+                    ),
+                    IF(
+                        (
+                            NOT(cond(ActionCondition.AT_LOCATION, monster_or_resource=target)),
+                            move(monster_or_resource=target)
+                        )
                     )
                 )
             
@@ -223,11 +197,11 @@ class ActionPlanner:
                                             NOT(cond(ActionCondition.INVENTORY_CONTAINS_USABLE_FOOD)),
                                             cond(ActionCondition.BANK_CONTAINS_USABLE_FOOD)
                                         )
-                                    ), 
+                                    ),
                                     prepare_action
                                 )
                             ),
-                            self.plan(ActionIntent(Intention.FIGHT))
+                            self.plan(ActionIntent(Intention.FIGHT_AND_HEAL))
                         ),
                         condition=condition
                     )
@@ -248,7 +222,7 @@ class ActionPlanner:
                                     prepare_action
                                 )
                             ),
-                            self.plan(ActionIntent(Intention.GATHER))
+                            gather()
                         ),
                         condition=condition
                     )
@@ -257,8 +231,14 @@ class ActionPlanner:
             # Task Execution
             case Intention.MOVE_TO_TASK_MASTER:
                 task_type = intent.params.get("task_type")
-                task_master_locations = self.world_state.get_task_master_locations().get(task_type)
-                return move(closest_of=task_master_locations)
+                world_location = f"task_master_{task_type}"
+
+                return IF(
+                    (
+                        NOT(cond(ActionCondition.AT_LOCATION, world_location=world_location)),
+                        move(world_location=world_location)
+                    )
+                )
 
             case Intention.COMPLETE_TASKS:
                 task_type = intent.params.get("type")
@@ -305,176 +285,166 @@ class ActionPlanner:
                 )
 
             case Intention.COMPLETE_MONSTER_TASK:
-                fight_action = DeferredAction(lambda agent:
-                    self.plan(ActionIntent(
-                        Intention.FIGHT_MONSTERS,
-                        monster=agent.get_task_target(),
-                        condition=NOT(cond(ActionCondition.TASK_COMPLETE))
-                    ))
-                )
-
-                return fight_action
+                return DeferredPlanNode(lambda agent: self.plan(ActionIntent(
+                    Intention.FIGHT_MONSTERS,
+                    monster=agent.get_task_target(),
+                    condition=NOT(cond(ActionCondition.TASK_COMPLETE))
+                )))
             
             case Intention.COMPLETE_ITEM_TASK_GATHERING:
-                gather_action = DeferredAction(lambda agent:
+                return DeferredPlanNode(lambda agent: group(
                     self.plan(ActionIntent(
                         Intention.GATHER_RESOURCES,
                         resource=agent.get_task_target(),
-                        condition=DeferredCondition(lambda agent:
+                        condition=NOT(cond(
+                            ActionCondition.BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY,
+                            item=agent.get_task_target(),
+                            quantity=agent.get_task_quantity_remaining()
+                        ))
+                    )),
+                    self.plan(ActionIntent(Intention.TURN_IN_ITEM_TASK_ITEMS))
+                ))
+            
+            case Intention.COMPLETE_ITEM_TASK_CRAFTING:
+                return DeferredPlanNode(lambda agent: group(
+                    IF(
+                        (
                             NOT(cond(
                                 ActionCondition.BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY,
                                 item=agent.get_task_target(),
                                 quantity=agent.get_task_quantity_remaining()
+                            )),
+                            self.plan(ActionIntent(
+                                Intention.CRAFT_OR_GATHER_INTERMEDIARIES,
+                                item=agent.get_task_target(),
+                                quantity=agent.get_task_quantity_remaining() - agent.world_state.get_amount_of_item_in_bank(agent.get_task_target())
                             ))
-                        ))
-                    )
-                )
-
-                return group(
-                    gather_action,
-                    self.plan(ActionIntent(Intention.TURN_IN_ITEM_TASK_ITEMS))
-                )
-            
-            case Intention.COMPLETE_ITEM_TASK_CRAFTING:
-                return group(
-                    DeferredAction(lambda agent:
-                        IF(
-                            (
-                                NOT(cond(ActionCondition.BANK_AND_INVENTORY_HAVE_ITEM_OF_QUANTITY, item=agent.get_task_target(), quantity=agent.get_task_quantity_remaining())),
-                                self.plan(ActionIntent(
-                                    Intention.CRAFT_OR_GATHER_INTERMEDIARIES,
-                                    item=agent.get_task_target(),
-                                    quantity=agent.get_task_quantity_remaining() - agent.world_state.get_amount_of_item_in_bank(agent.get_task_target())
-                                ))
-                            )
                         )
                     ),
                     self.plan(ActionIntent(Intention.TURN_IN_ITEM_TASK_ITEMS))
-                )
+                ))
             
             case Intention.TURN_IN_ITEM_TASK_ITEMS:
                 return group(
-                    DeferredAction(lambda agent: add_item_reservations(
-                        name=agent.name, 
-                        items=[{ "code": agent.get_task_target(), "quantity": agent.get_task_quantity_remaining() }]
-                    )),
+                    set_context(key="selected_items", value=DeferredExpr(lambda agent: [{ "code": agent.get_task_target(), "quantity": agent.get_task_quantity_remaining() }])),
+                    add_item_reservations(items=ContextValue("selected_items")),
                     WHILE(
                         group(
-                            self.plan(ActionIntent(Intention.DEPOSIT_ALL_AT_BANK)),   
-                            DeferredAction(lambda agent: bank_withdraw_item(items=ItemOrder(items=[ItemSelection(item=agent.get_task_target(), quantity=ItemQuantity(max=min(agent.get_task_quantity_remaining(), agent.get_free_inventory_spaces())))]), reserve=False)),
+                            self.plan(ActionIntent(Intention.DEPOSIT_ALL_AT_BANK)),
+                            bank_withdraw_item(items=DeferredExpr(lambda agent: [{ "code": agent.get_task_target(), "quantity": min(agent.get_task_quantity_remaining(), agent.get_inventory_size()) }])),
                             self.plan(ActionIntent(Intention.MOVE_TO_TASK_MASTER, task_type="items")),
-                            DeferredAction(lambda agent: task_trade(item=agent.get_task_target(), quantity=agent.get_quantity_of_item_in_inventory(agent.get_task_target()))),
-                            DeferredAction(lambda agent: update_item_reservations(
-                                name=agent.name,
-                                items=[{ "code": agent.get_task_target(), "quantity": -agent.context["last_trade"]["quantity"] }]
-                            )),
+                            task_trade(item=DeferredExpr(lambda agent: agent.get_task_target()), quantity=DeferredExpr(lambda agent: agent.get_quantity_of_item_in_inventory(agent.get_task_target()))),
+                            update_item_reservations(
+                                item=DeferredExpr(lambda agent: agent.get_task_target()),
+                                quantity=ContextValue("last_trade_quantity")
+                            ),
                         ),
                         condition=NOT(cond(ActionCondition.TASK_COMPLETE))
                     )
                 )
             
-            # Complex Intentions             
-            case Intention.BANK_THEN_RETURN:
-                if intent.params.get("preset") == "all":
-                    bank_action = bank_all_items()
-                else:
-                    items: List[ItemSelection] = intent.params.get("items")
-                    bank_action = bank_deposit_item(items=items)
-        
-                bank_locations = self.world_state.get_bank_locations()
-                return group(
-                    move(closest_of=bank_locations),
-                    bank_action,
-                    move(previous=True)
-                )
-            
+            # Complex Intentions            
             case Intention.GATHER_MATERIALS_FOR_CRAFT:
                 item = intent.params.get("item")
-                quantity = intent.params.get("quantity", 1)
+                quantity_context_key = intent.params.get("quantity_context_key")
 
-                return IF(
-                    (
-                        cond(ActionCondition.RESOURCE_FROM_FIGHTING, resource=item),
-                        DeferredAction(lambda agent: self.plan(ActionIntent(
-                            Intention.FIGHT_MONSTERS, 
-                            monster=agent.world_state.get_monster_for_item(item),
-                            condition=NOT(cond__item_qty_in_inv_and_bank(item, quantity))
-                        )))
-                    ),
-                    (
-                        cond(ActionCondition.RESOURCE_FROM_GATHERING, resource=item),
-                        self.plan(ActionIntent(
-                            Intention.GATHER_RESOURCES,
-                            resource=item,
-                            condition=NOT(cond__item_qty_in_inv_and_bank(item, quantity))
-                        ))
-                    ),
-                    (
-                        cond(ActionCondition.RESOURCE_FROM_CRAFTING, resource=item),
-                        self.plan(ActionIntent(
-                            Intention.CRAFT_OR_GATHER_INTERMEDIARIES,
-                            item=item,
-                            quantity=quantity,
-                            gather_intermediaries=True
-                        ))
-                    ),
-                    # (
-                    #     cond(ActionCondition.RESOURCE_FROM_TASKS, resource=material["code"]),
-                    #     self.plan(ActionIntent(
-                    #         Intention.COMPLETE_TASKS,
-                    #         resource=material["code"],
-                    #         condition=NOT(cond__item_qty_in_inv_and_bank(material["code"], material["quantity"]))
-                    #     ))
-                    # ),
-                    fail_path=fail_action()
-                )
+                return DeferredPlanNode(lambda agent: group(*[
+                    IF(
+                        (
+                            cond(ActionCondition.RESOURCE_FROM_FIGHTING, resource=item["code"]),
+                            DeferredPlanNode(lambda agent: self.plan(ActionIntent(
+                                Intention.FIGHT_MONSTERS, 
+                                monster=agent.world_state.get_monster_for_item(item["code"]),
+                                condition=NOT(cond(ActionCondition.GLOBAL_AVAILABLE_QUANTIY_OF_ITEM, item=item["code"], quantity=item["quantity"] * agent.context[quantity_context_key]))
+                            )))
+                        ),
+                        (
+                            cond(ActionCondition.RESOURCE_FROM_GATHERING, resource=item["code"]),
+                            DeferredPlanNode(lambda agent: self.plan(ActionIntent(
+                                Intention.GATHER_RESOURCES,
+                                resource=item["code"],
+                                condition=NOT(cond(ActionCondition.GLOBAL_AVAILABLE_QUANTIY_OF_ITEM, item=item["code"], quantity=item["quantity"] * agent.context[quantity_context_key]))
+                            )))
+                        ),
+                        (
+                            cond(ActionCondition.RESOURCE_FROM_CRAFTING, resource=item["code"]),
+                            DeferredPlanNode(lambda agent: self.plan(ActionIntent(
+                                Intention.CRAFT_OR_GATHER_INTERMEDIARIES,
+                                item=item["code"],
+                                quantity=item["quantity"] * agent.context[quantity_context_key]
+                            )))
+                        ),
+                        # (
+                        #     cond(ActionCondition.RESOURCE_FROM_TASKS, resource=material["code"]),
+                        #     self.plan(ActionIntent(
+                        #         Intention.COMPLETE_TASKS,
+                        #         condition=NOT(cond__item_qty_in_inv_and_bank(item["code"], item["quantity"] * agent.context[quantity_context_key]))
+                        #     ))
+                        # ),
+                        fail_path=fail_action()
+                    ) for item in agent.world_state.get_crafting_materials_for_item(item)]
+                ))
             
             case Intention.CRAFT_OR_GATHER_INTERMEDIARIES:
                 item = intent.params.get("item")
-        quantity = intent.params.get("quantity", 1)
+                quantity = intent.params.get("quantity")
 
-        context_counter = f"counter_craft_{item}"
+                amount_crafted = f"{item}_amount_crafted"
+                total_amount_to_craft = f"{item}_total_amount_to_craft"
+                craft_batch_size = f"{item}_craft_batch_size"
 
-        return group(
-            reset_context_counter(name=context_counter),
-            WHILE(
-                group(
-                    IF(
-                        (
-                            NOT(cond(ActionCondition.CRAFT_INGREDIENTS_IN_BANK_OR_INV, item=item, quantity=quantity)),
-                            self.plan(ActionIntent(Intention.GATHER_MATERIALS_FOR_CRAFT, item=item, quantity=quantity))
-                        ),
-                        (
-                            NOT(cond(ActionCondition.CRAFT_INGREDIENTS_IN_INV, item=item, quantity=quantity)),
-                            group(
-                                add_item_reservations(crafting_materials_for=item, crafting_materials_sets=quantity),
-                                self.plan(ActionIntent(Intention.DEPOSIT_ALL_AT_BANK)),
-                                TRY(
-                                    self.plan(ActionIntent(Intention.WITHDRAW_ITEMS, crafting_materials_for=item, crafting_materials_sets=quantity)),
-                                    finally_path=clear_item_reservations(crafting_materials_for=item, crafting_materials_sets=quantity)
+                return group(
+                    set_context(key=amount_crafted, value=0),
+                    set_context(key=total_amount_to_craft, value=quantity),
+                    WHILE(
+                        group(
+                            set_context(key=craft_batch_size, value=DeferredExpr(lambda agent: min(agent.context[total_amount_to_craft] - agent.context[amount_crafted], agent.get_max_batch_size_for_item(item)))),
+                            IF(
+                                (
+                                    NOT(cond(ActionCondition.CRAFT_INGREDIENTS_IN_BANK_OR_INV, item=item, quantity=ContextValue(craft_batch_size))),
+                                    self.plan(ActionIntent(Intention.GATHER_MATERIALS_FOR_CRAFT, item=item, quantity_context_key=craft_batch_size)),
                                 )
+                            ),
+                            # After gathering and depositing, another agent could reserve and grab them first, so need to recheck the available batch size
+                            set_context(key=craft_batch_size, value=DeferredExpr(lambda agent: min(agent.context[total_amount_to_craft] - agent.context[amount_crafted], agent.get_max_batch_size_for_item(item)))),
+                            IF(
+                                (
+                                    NOT(cond(ActionCondition.CRAFT_INGREDIENTS_IN_INV, item=item, quantity=ContextValue(craft_batch_size))),
+                                    group(
+                                        set_context(key="selected_items", value=DeferredExpr(lambda agent: agent.world_state.get_crafting_materials_for_item(item, agent.context[craft_batch_size]))),
+                                        add_item_reservations(items=ContextValue("selected_items")),
+                                        self.plan(ActionIntent(Intention.DEPOSIT_ALL_AT_BANK)),
+                                        TRY(
+                                            bank_withdraw_item(items=ContextValue("selected_items")),
+                                            finally_path=group(
+                                                clear_item_reservations(items=ContextValue("selected_items")),
+                                                clear_context(key="selected_items")
+                                            )
+                                        )
+                                    )
+                                )
+                            ),
+                            TRY(
+                                self.plan(ActionIntent(Intention.CRAFT_AT_STATION, item=item, quantity=ContextValue(craft_batch_size))),
+                                update_context(key=amount_crafted, value=ContextValue("last_craft_quantity")),
+                                error_path=group(
+                                    clear_context(key=amount_crafted),
+                                    clear_context(key=total_amount_to_craft),
+                                    fail_action()
+                                ),
+                                finally_path=clear_context(key=craft_batch_size)
                             )
-                        )
+                        ),
+                        condition=NOT(cond(
+                            ActionCondition.CONTEXT_VALUE_EQUALS, 
+                            key=amount_crafted, 
+                            value=ContextValue(total_amount_to_craft)
+                        ))
                     ),
-                    TRY(
-                        self.plan(ActionIntent(Intention.CRAFT, item=item, quantity=quantity)),
-                        increment_context_counter(name=context_counter, value_keys=["last_craft", "quantity"]),
-                        error_path=group(
-                            clear_context_counter(name=context_counter),
-                            fail_action()
-                        )
-                    )
-                ),
-                condition=NOT(cond(
-                    ActionCondition.CONTEXT_COUNTER_AT_VALUE, 
-                    name=context_counter, 
-                    value=quantity
-                ))
-            )
+                    clear_context(key=amount_crafted),
+                    clear_context(key=total_amount_to_craft)
+                )
             
             case _:
                 raise Exception("Unknown action type.")
             
-    def _compute_craft_of_gather_intermediaries(self):
-        
-        )

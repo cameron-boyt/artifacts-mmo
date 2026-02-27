@@ -6,7 +6,7 @@ from src.action import ActionCondition, ActionConditionExpression, LogicalOperat
 def cond(condition: ActionCondition, **params) -> ActionConditionExpression:
     return ActionConditionExpression(
         condition=condition,
-        parameters=params
+        params=params
     )
 
 # Operator Factories

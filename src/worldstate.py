@@ -117,6 +117,26 @@ class WorldState:
 
         return item_stat_vectors
     
+    # World Stuff
+    def get_locations_of_world_location(self, loc: str) -> LocationSet:
+        match loc:
+            case "bank":
+                return self.get_bank_locations()
+            
+            case "task_master_monsters":
+                return self.get_task_master_locations()["monsters"]
+            
+            case "task_master_items":
+                return self.get_task_master_locations()["items"]
+            
+    def get_locations_of_monster_or_resource(self, target: str) -> LocationSet:
+        if self.is_a_monster(target):
+            return self.get_locations_of_monster(target)
+        elif self.is_a_resource(target):
+            return self.get_locations_of_resource(target)
+        else:
+            raise Exception(f"Unknown monster or resource: {target}")
+    
     # Bank Stuff
     def get_bank_items(self) -> Dict[str, int]:
         return self._bank_data
@@ -146,12 +166,18 @@ class WorldState:
     def item_from_crafting(self, item: str) -> bool:
         return self.item_is_craftable(item)
     
-    def get_crafting_materials_for_item(self, item: str) -> List[Dict[str, Any]] | None:
+    def get_crafting_materials_for_item(self, item: str, quantity: int = 1) -> List[Dict[str, Any]] | None:
         if not self.item_is_craftable(item):
             raise KeyError(f"{item} is not craftable.")
         
         materials = self._item_data[item]["craft"]["items"]
-        return [{"code": m["code"], "quantity": m["quantity"]} for m in materials]
+        return [{"code": m["code"], "quantity": m["quantity"] * quantity} for m in materials]
+    
+    def get_max_batch_size_for_item(self, item: str, inv_size: int) -> int:
+        materials = self.get_crafting_materials_for_item(item)
+        total_materials = sum(m["quantity"] for m in materials)
+        max_batch_size = inv_size // total_materials
+        return max_batch_size
     
     def get_workshop_for_item(self, item: str) -> str:
         if not self.item_is_craftable(item):
@@ -205,7 +231,7 @@ class WorldState:
     
     # Equipment Checkers
     def is_equipment(self, item: str) -> bool:
-        return self.is_an_item(item) and not self.get_item_info(item)["type"] == "resource"
+        return self.is_an_item(item) and not self.get_item_info(item)["type"] in ["resource", "consumable"]
     
     def get_equip_slot_for_item(self, item: str) -> str:
         if not self.is_equipment(item):
@@ -222,10 +248,11 @@ class WorldState:
     def is_armour(self, item: str) -> bool:
         return self.is_an_item(item) and self._item_data[item]["type"] in ARMOUR_SLOTS
     
-    def prepare_best_loadout_for_task(self, character: Dict[str, Any], task: str, target: str) -> Tuple[Dict[str, int], List[Dict[str, str]]]:
+    def prepare_best_loadout_for_task(self, character: Dict[str, Any], task: str, target: str) -> Tuple[List[Dict[str, int]], List[Dict[str, int]], List[Dict[str, str]]]:
         loadout = self.get_best_loadout_for_task(character, task, target)
 
-        final_loadout = []
+        equipment_loadout = []
+        inventory_loadout = []
         equip_queue = []
 
         for item in loadout:
@@ -234,7 +261,7 @@ class WorldState:
             if any([equipped == item for slot, equipped in character.items() if re.search(r'_slot$', slot)]):
                 continue
 
-            final_loadout.append({ "code": item, "quantity": 1 })
+            equipment_loadout.append({ "code": item, "quantity": 1 })
 
             # Prepare the equip queue
             item_slot = self.get_equip_slot_for_item(item)
@@ -245,9 +272,9 @@ class WorldState:
             best_food = self.get_best_food_for_character_in_bank(character)
             if best_food:
                 food_amount = self.get_amount_of_item_in_bank(best_food)
-                final_loadout.append({ "code": best_food, "quantity": min(50, food_amount) })
+                inventory_loadout.append({ "code": best_food, "quantity": min(50, food_amount) })
 
-        return final_loadout, equip_queue
+        return equipment_loadout, inventory_loadout, equip_queue
     
     def get_best_loadout_for_task(self, character: dict, task: str, target: str) -> List[str]:
         if task == "fighting":
@@ -601,79 +628,4 @@ class WorldState:
     # Other Checkers
     def get_task_master_locations(self) -> LocationSet:
         return self._interactions.tasks_masters
-
-   ## Action Performance
-    async def perform(self, action: Action) -> Tuple[Dict[str, Any] | None, ActionOutcome]:
-        match action.type:
-            case MetaAction.CREATE_ITEM_RESERVATION:
-                name = action.params.get("name")
-                items = action.params.get("items")
-
-                for item in items:
-                    self.set_bank_reservation(name, item["code"], item["quantity"])
-
-                return None, ActionOutcome.SUCCESS
-
-            case MetaAction.UPDATE_ITEM_RESERVATION:
-                name = action.params.get("name")
-                items = action.params.get("items")
-
-                for item in items:
-                    self.update_bank_reservation(name, item["code"], item["quantity"])
-
-                return None, ActionOutcome.SUCCESS
-
-            case MetaAction.CLEAR_ITEM_RESERVATION:
-                name = action.params.get("name")
-                items = action.params.get("items")
-
-                for item in items:
-                    self.clear_bank_reservation(name, item)
-
-                return None, ActionOutcome.SUCCESS
-            
-            case MetaAction.PREPARE_LOADOUT:
-                character = action.params.get("character")
-                task = action.params.get("task")
-                target = action.params.get("target")
-
-                loadout, equip_queue = self.prepare_best_loadout_for_task(character, task, target)
-                context_update = {
-                    "prepared_loadout": loadout,
-                    "equip_queue": equip_queue
-                }
-
-                return context_update, ActionOutcome.SUCCESS
-            
-            case MetaAction.CLEAR_PREPARED_LOADOUT:
-                context_update = { "prepared_loadout": [] }
-                return context_update, ActionOutcome.SUCCESS
-
-            case MetaAction.RESET_CONTEXT_COUNTER:
-                counter_name = action.params.get("name")
-                context_update = { counter_name: 0 }
-                return context_update, ActionOutcome.SUCCESS
-            
-            case MetaAction.INCREMENT_CONTEXT_COUNTER:
-                counter_name = action.params.get("name")
-                counter_value = action.params.get("value", 0)
-                counter_value_keys = action.params.get("value_keys", [])
-                
-                if counter_value_keys:
-                    context_update = { counter_name: counter_value_keys }
-                else:
-                    context_update = { counter_name: counter_value }
-
-                return context_update, ActionOutcome.SUCCESS
-            
-            case MetaAction.CLEAR_CONTEXT_COUNTER:
-                counter_name = action.params.get("name")
-                context_update = { counter_name: None }
-                return context_update, ActionOutcome.SUCCESS
-            
-            case MetaAction.FAIL_OUT:
-                return None, ActionOutcome.FAIL
-
-            case _:
-                raise Exception(f"[World] Unknown action type: {action.type}")
             

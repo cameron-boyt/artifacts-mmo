@@ -75,7 +75,7 @@ class GoalCoordinator():
 
         return progression_goals, pantry_goals
 
-    def _get_amount_of_item_in_world(self, item: str) -> int:
+    def get_amount_of_item_in_world(self, item: str) -> int:
         amount_in_bank = self.world_state.get_amount_of_item_in_bank(item)
         amount_in_inventories = 0
         for t in self._tracked_characters:
@@ -111,6 +111,13 @@ class GoalCoordinator():
 
         # Update Tracker
         character_tracker.update_inventory(inventory)
+
+    """
+    Eventually we want to move away from using a strict planner-only sytsem and migrate to where the coordinator hands out all tasks
+    and tasks that are in motion, once finshed, repeat unless another node has been queued (unless flagged otherwise). This ensures
+    agents are always doing something, but will swap to a goal-ordinated action when needed. This also allows further role-assignment to agents
+    such as strict fighter or gatherer agents (since we can't gear and train everyone up to be fighters/gathers at the same time
+    )"""
     
     def get_next_goal(self, character: dict, goal_type: str):
         if goal_type == "progression":
@@ -122,17 +129,18 @@ class GoalCoordinator():
         
     def _get_next_progression_goal(self, character: dict, primary_worker: bool = False):
         for goal in self._progression_goals:
-            if self._get_amount_of_item_in_world(goal.item) >= goal.quantity:
+            if self.get_amount_of_item_in_world(goal.item) >= goal.quantity:
                 continue
 
             # Check the agent meets the conditions to attempt this goal
             if self.world_state.character_meets_crafting_conditions(character, goal.item):
-                current_quantity = self._get_amount_of_item_in_world(goal.item)
+                current_quantity = self.get_amount_of_item_in_world(goal.item)
 
                 if primary_worker:
-                    node = self.planner.plan(ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=goal.item, quantity=goal.quantity - current_quantity, gather_intermediaries=True))
+                    node = self.planner.plan(ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=goal.item, quantity=goal.quantity - current_quantity))
                 else:
                     node = self.planner.plan(ActionIntent(Intention.GATHER_MATERIALS_FOR_CRAFT, item=goal.item, quantity=goal.quantity - current_quantity))
+                    
                 self.scheduler.queue_action_node(character["name"], node)
                 return
             else:
@@ -143,16 +151,16 @@ class GoalCoordinator():
 
     def _get_next_pantry_goal(self, character: dict):
         for goal in self._pantry_goals:
-            if self._get_amount_of_item_in_world(goal.item) >= goal.desired_quantity:
+            if self.get_amount_of_item_in_world(goal.item) >= goal.desired_quantity:
                 goal.use_replenish_threshold = True
                 continue
-            elif goal.use_replenish_threshold and self._get_amount_of_item_in_world(goal.item) >= goal.replenish_threshold:
+            elif goal.use_replenish_threshold and self.get_amount_of_item_in_world(goal.item) >= goal.replenish_threshold:
                 continue
 
             goal.use_replenish_threshold = False
 
-            current_quantity = self._get_amount_of_item_in_world(goal.item)
-            node = self.planner.plan(ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=goal.item, quantity=goal.desired_quantity - current_quantity, gather_intermediaries=True))
+            current_quantity = self.get_amount_of_item_in_world(goal.item)
+            node = self.planner.plan(ActionIntent(Intention.CRAFT_OR_GATHER_INTERMEDIARIES, item=goal.item, quantity=goal.desired_quantity - current_quantity))
             self.scheduler.queue_action_node(character["name"], node)
             return
         
